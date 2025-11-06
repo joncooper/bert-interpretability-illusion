@@ -93,6 +93,56 @@ if section == "Introduction":
         - **Books**: Toronto BookCorpus (198,085 sentences)
         """)
 
+    st.markdown("---")
+
+    # Research context expander
+    with st.expander("📚 Research Context: Why This Paper Matters (Click to expand)"):
+        st.markdown("""
+        ### Prior Work on Neuron Interpretability
+
+        **Success in Computer Vision:**
+        - Individual neurons in CNNs clearly encode edges, textures, and objects (Olah et al., 2018)
+        - Visualization methods reveal interpretable features at every layer
+        - These findings are robust across different datasets and architectures
+
+        **Early Work on Language Models:**
+        - Prior research found seemingly interpretable neurons in BERT and similar models
+        - Dalvi et al. (2019): Identified neurons tracking syntactic features
+        - Mu & Andreas (2020): Found neurons encoding semantic properties
+        - **Assumption**: These findings generalize, similar to vision models
+
+        ### This Paper's Key Contribution
+
+        **A Methodological Wake-Up Call:**
+
+        This paper challenges those early findings by asking: *Did previous researchers
+        test their interpretability claims on multiple diverse datasets?*
+
+        **The Answer:** Usually not! And when you do...
+
+        What looked like meaningful concept encoding might actually be:
+        1. **Dataset idiosyncrasy** - Sentences from that dataset cluster together geometrically
+        2. **Local semantic coherence** - Similar sentences are neighbors, creating apparent patterns
+        3. **Human pattern-seeking** - We see meaningful patterns even in noise
+
+        ### Why This Matters
+
+        **For Interpretability Research:**
+        - Single-dataset analysis is insufficient for interpretability claims
+        - Patterns must be validated across multiple diverse datasets
+        - Many published "neuron interpretations" may be artifacts
+
+        **For AI Safety:**
+        - Techniques using concept directions for bias detection/mitigation may be unreliable
+        - If directions don't generalize, interventions might have unintended effects
+        - Need more robust interpretability methods
+
+        **For Understanding Language Models:**
+        - Language models may not learn discrete "concept neurons" like vision models do
+        - Instead, they develop complex geometric structure with multiple overlapping representations
+        - Understanding requires more sophisticated analysis than neuron-level inspection
+        """)
+
 # ===== THE ILLUSION REVEALED =====
 elif section == "The Illusion Revealed":
     st.header("🎭 The Illusion Revealed")
@@ -228,6 +278,65 @@ elif section == "Experimental Setup":
 
     st.markdown("---")
 
+    # Detailed methodology expander
+    with st.expander("🔬 Detailed Experimental Methodology (Click to expand)"):
+        st.markdown("""
+        ### Neuron Selection
+
+        **What is a "neuron" in this context?**
+        - Each of the 768 dimensions in the final layer embedding space
+        - Corresponds to a basis vector: e_d = [0, 0, ..., 1, ..., 0] with 1 at position d
+        - The researchers randomly selected 25 neurons from the 768 available
+
+        ### Random Directions
+
+        **Control condition to test if patterns are neuron-specific:**
+        - Generated 33 random unit vectors in 768-dimensional space
+        - Each random direction is: v = random vector, normalized to length 1
+        - Used to check if random directions also show patterns (spoiler: they do!)
+
+        ### Top Sentence Selection
+
+        **How were the "top 10" sentences chosen?**
+
+        For each neuron/direction v and dataset S:
+        1. Compute projection score for every sentence: `score(x) = ⟨x, v⟩`
+        2. This is the dot product between sentence embedding x and direction v
+        3. Higher score = sentence "activates" that direction more strongly
+        4. Select the 10 sentences with highest scores
+
+        **What does the projection score mean?**
+        - Measures how much a sentence embedding "points in the direction" of v
+        - Similar to asking "how strongly does this sentence activate this neuron?"
+        - In neural network terms: like the pre-activation value for that neuron
+
+        ### Annotation Protocol
+
+        **Double-blind annotation process:**
+
+        Annotators were shown 10 sentences under one of three conditions:
+        1. **Test**: Top 10 sentences for a neuron (25 neurons × 4 datasets = 100 sets)
+        2. **Control 1**: Top 10 for a random direction (33 directions × 4 datasets = 132 sets)
+        3. **Control 2**: Random 10 sentences from dataset (29 sets)
+
+        **Blinding:**
+        - Annotators KNEW which dataset the sentences came from
+        - Annotators DID NOT know which condition they were seeing
+        - This prevents bias: can't favor neurons over random directions
+
+        **Task:**
+        - Identify any patterns shared by multiple sentences
+        - Mark which sentences match each pattern
+        - Two independent annotators per set for reliability
+
+        **Inter-rater Agreement:**
+        - Measured using Cohen's kappa and raw agreement rates
+        - Disagreement rates: 8% (neurons), 18% (random), 38% (baseline)
+        - Higher agreement on neuron/random sets suggests real patterns exist
+        """)
+
+    st.markdown("---")
+
     st.markdown("""
     ### What is a "Pattern"?
 
@@ -308,6 +417,13 @@ elif section == "Experimental Setup":
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
+    st.warning("""
+    ⚠️ **Note:** This visualization uses **simulated data** to illustrate the concept.
+    Real data from the paper (Figure 1) shows similar clustering patterns but with more
+    complex structure. The key finding—that datasets occupy distinct regions—holds in
+    the actual data.
+    """)
 
     st.info("""
     **Key Observation:** The four datasets form **distinct clusters** in the embedding space.
@@ -536,6 +652,12 @@ elif section == "Why Does This Happen?":
             - QNLI: 83% correctly identified
             - Wiki: 73% correctly identified
             - Books: 96% correctly identified
+
+            3. **Activation Range Overlap:** Only **38%** of neuron/dataset pairs have
+               overlapping top-10 activation ranges
+
+            This means for most neurons, the highly activating sentences from different
+            datasets are in completely separate regions of activation space!
             """)
 
         with col2:
@@ -737,8 +859,14 @@ elif section == "Why Does This Happen?":
         st.markdown("### Monotonic Token Frequencies")
 
         st.markdown("""
-        The researchers also found evidence of **global concept directions** by checking
+        The researchers found evidence of **global concept directions** by checking
         if certain tokens monotonically increase/decrease along neuron directions.
+
+        **Methodology:**
+        - Tested **915 tokens** appearing ≥100 times in all four datasets
+        - For each neuron/token pair, checked if token frequency changes monotonically
+          across activation quintiles (0-20%, 20-40%, ..., 80-100%)
+        - Baseline (random): Only **1.7%** show monotonicity by chance
         """)
 
         col1, col2 = st.columns([2, 1])
@@ -792,10 +920,20 @@ elif section == "Why Does This Happen?":
             """)
 
         st.info("""
-        **Finding:** About **27%** of neuron/token pairs show monotonic relationships
-        (compared to 1.7% baseline).
+        **Key Results:**
 
-        This suggests **both global and local concepts exist** in BERT's embedding space!
+        - **27%** of neuron/token pairs show monotonic relationships WITHIN single datasets
+        - Only **1.9%** show monotonicity across ALL FOUR datasets simultaneously
+        - Baseline (random): **1.7%** show monotonicity by chance
+
+        **Interpretation:**
+
+        The 14x difference (27% vs 1.9%) reveals that what looks like a global concept
+        direction is usually dataset-specific! Very few neurons encode truly global concepts
+        that generalize across all datasets.
+
+        This suggests **both global and local concepts exist**, but most "concept directions"
+        are actually dataset-level phenomena.
         """)
 
     with tab3:
@@ -1422,21 +1560,87 @@ elif section == "Key Takeaways":
     # Final thoughts
     st.markdown("### 🎬 Final Thoughts")
 
+    with st.expander("🤔 What Do These Findings Mean for 'Concepts in BERT'? (Click to expand)"):
+        st.markdown("""
+        ### The Deeper Question: Does BERT Actually Learn Concepts?
+
+        This paper raises a fundamental philosophical question about what we mean by
+        "concepts" in neural networks.
+
+        **The Naive View (Challenged by This Paper):**
+        - Individual neurons encode discrete, human-interpretable concepts
+        - These concepts are stable and generalizable properties
+        - Finding interpretable patterns means we understand what the model learned
+
+        **What This Paper Suggests Instead:**
+
+        **BERT doesn't learn concepts the way we hoped it would.** Instead, it learns:
+
+        1. **Geometric Structure:**
+           - Embeddings organize in complex, high-dimensional space
+           - Similar inputs cluster together (local coherence)
+           - Different data distributions occupy different regions (idiosyncrasy)
+
+        2. **Statistical Regularities:**
+           - Patterns that happen to be consistent within a dataset's region
+           - Not semantic understanding, but statistical correlation
+           - May or may not generalize to other contexts
+
+        3. **A Few Global Features:**
+           - Common linguistic markers (pronouns, function words)
+           - But these are the exception, not the rule
+           - Most patterns are dataset-specific or local
+
+        ### What Does BERT "Know"?
+
+        **The Uncomfortable Truth:**
+        BERT's representations are more like a complex index of statistical patterns than
+        a structured knowledge base of concepts. What looks like "understanding" may be:
+        - Memorization of training data structure
+        - Exploitation of dataset biases
+        - Statistical patterns we interpret as semantic meaning
+
+        **This doesn't mean BERT isn't useful!** It just means our interpretation methods
+        need to match the reality of how these models work, not our intuitions about
+        how we think they should work.
+
+        ### Implications for Interpretability
+
+        **We need to rethink our approach:**
+        - Stop looking for "the neuron for X"
+        - Start understanding the geometric and statistical structure
+        - Accept that interpretability might be harder than we thought
+        - Develop new methods that account for dataset-dependency and local structure
+
+        **The path forward:**
+        - Multi-dataset validation as standard practice
+        - Geometric analysis of embedding spaces
+        - Understanding interactions between neurons, not individual neurons
+        - Acknowledging limits of human interpretability
+        """)
+
     st.success("""
-    This paper provides an important **cautionary tale** for interpretability research.
+    ### A Cautionary Tale
+
+    This paper provides an important **methodological wake-up call** for interpretability research.
 
     It's easy to be fooled by patterns that seem clear and consistent within a single
     dataset. But true understanding requires **rigorous validation** across multiple
     contexts.
 
-    The interpretability illusion reminds us to:
+    **Key Lessons:**
     - Be humble about our interpretations
     - Test rigorously before concluding
-    - Consider alternative explanations
-    - Validate across multiple datasets
+    - Consider alternative explanations (dataset effects, local clustering, human bias)
+    - Always validate across multiple diverse datasets
+
+    **The Standard This Sets:**
+
+    Single-dataset interpretability claims should be viewed with skepticism. The gold standard
+    is now: **Does this interpretation replicate across multiple diverse datasets?**
 
     As the field of AI interpretability grows, methodological rigor becomes ever more
-    important. This paper sets a high standard for careful, thorough analysis.
+    important. This paper challenges us to meet that standard.
     """)
 
     st.markdown("---")
