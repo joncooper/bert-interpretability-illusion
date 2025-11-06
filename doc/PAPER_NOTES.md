@@ -1,406 +1,622 @@
 # Paper Notes: An Interpretability Illusion for BERT
 
 **Paper**: An Interpretability Illusion for BERT  
-**arXiv ID**: 2104.07143  
-**Authors**: Avi Caciularu, Yoav Goldberg, Arman Cohan  
-**Year**: 2021
+**arXiv ID**: 2104.07143v1  
+**Authors**: Tolga Bolukbasi*, Adam Pearce*, Ann Yuan*, Andy Coenen, Emily Reif, Fernanda Viégas, Martin Wattenberg (*Equal contribution)  
+**Affiliation**: Google Research, Cambridge, MA, USA  
+**Date**: April 14, 2021  
+**Pages**: 12
 
 ## Abstract and Main Thesis
 
-The paper challenges the widely-held assumption that attention weights in BERT-like models provide meaningful interpretations of model behavior. The authors demonstrate what they call an "interpretability illusion" - attention patterns that appear to be meaningful but actually bear little relationship to the model's true decision-making process.
+The paper describes an "interpretability illusion" that arises when analyzing BERT's internal representations. Individual neurons (and linear combinations of activations) in BERT may **spuriously appear to encode single, simple concepts** when examined on one dataset, but reveal completely different patterns on another dataset. The authors trace this illusion to:
+1. Geometric properties of BERT's embedding space
+2. The fact that common text corpora represent narrow slices of possible English sentences
+
+**Key insight**: Patterns that look consistent and interpretable within a single dataset do not generalize across datasets, making them unreliable for understanding what the model has actually learned.
 
 ## Key Findings
 
-### 1. Attention Weights Don't Reliably Indicate Importance
+### 1. The Core Illusion: Dataset-Dependent Patterns
 
-The central finding is that attention weights, despite appearing interpretable, do not consistently reflect which input tokens are actually important for the model's predictions. The authors show that:
+The central finding is demonstrated through neuron 221 in layer 12:
 
-- **Attention weights can be adversarially manipulated** without significantly changing model predictions
-- **Tokens receiving high attention** are not necessarily those that influence the output
-- **Gradient-based importance measures** (which reflect actual model sensitivity) often disagree with attention weights
+**On Quora Question Pairs dataset**, top activating sentences:
+- "What is the meaning behind the song ""Angel"" by Eric Clapton?"
+- "What's the meaning of Johnny Cash's song ""King of the Hill""?"
+- "What is the meaning behind the Tears for Fears song ""Mad World""..."
 
-### 2. The Illusion is Systematic, Not Random
+→ **Interpretation**: Neuron encodes "song titles" or specific syntactic structure
 
-The interpretability illusion is not just noise - it has systematic properties:
+**On Wikipedia QA dataset (QNLI)**, same neuron's top activating sentences:
+- "On 16 June 2006, it was announced that Everton had entered into talks..."
+- "On 15 September 1940, known as the Battle of Britain Day..."
+- "On 20 August 2010, Queen's manager Jim Beach put out a Newsletter..."
 
-- Attention patterns often follow **linguistic structures** (syntax, semantics)
-- This structural coherence creates a **false sense of interpretability**
-- Humans are prone to over-interpreting these patterns as explanatory
-- The patterns are consistent across instances but not predictive of model behavior
+→ **Interpretation**: Neuron encodes "historical events" or "sentences beginning with dates"
 
-### 3. Experimental Evidence
+**On Toronto BookCorpus**, same neuron's top activating sentences:
+- "Lara pulled out the document Reed had supplied from Gresham's briefcase."
+- "I take Kellan's business card from my pocket and stretch it over to Realm."
+- "Pilcher took a walkie-talkie out of his coat and spoke into the receiver."
 
-The paper provides multiple lines of evidence:
+→ **Interpretation**: Yet another completely different pattern!
 
-#### Adversarial Attention Experiments
-- Modified attention distributions while preserving model outputs
-- Successfully changed attention patterns by >50% with <1% accuracy drop
-- Demonstrates that attention is not a faithful explanation of predictions
+**Conclusion**: The neuron doesn't consistently encode any single concept - the apparent pattern is an illusion that depends entirely on the dataset.
 
-#### Correlation Studies
-- Compared attention weights to gradient-based importance scores
-- Found low correlation (Kendall's tau often <0.3)
-- Attention and gradients identify different "important" tokens
+### 2. The Illusion is Widespread
 
-#### Counterfactual Analysis
-- Masked tokens with high attention → small prediction changes
-- Masked tokens with low attention → sometimes large prediction changes
-- Shows attention doesn't capture counterfactual importance
+- Tested 25 randomly selected neurons
+- Tested 33 random directions (linear combinations)
+- Found patterns in >80% of neurons/directions within each dataset
+- On average, each neuron showed **2.5 distinct patterns** across the 4 datasets
+- The illusion affects both individual neurons AND random directions equally
+- Appears in layer 12 (final layer) and informally observed in layers 2 and 7
+
+### 3. Quantitative Results
+
+**Pattern Detection Rates** (Table 1):
+- Neurons: 80% contain patterns, 12% no pattern, 8% conflicting annotations
+- Random directions: 82% contain patterns, 0% no pattern, 18% conflicting
+- Random sentence sets (baseline): 14% contain patterns, 48% no pattern, 38% conflicting
+
+**Pattern Strength**:
+- Top activating sentences have ~6.8 examples per pattern on average
+- Random sentences have ~5.0 examples per pattern
+- Meaningful patterns have significantly more positive examples than baseline
 
 ## Technical Details
 
 ### Methodology
 
-#### 1. Adversarial Attention Framework
+#### 1. Datasets Used
 
-The authors develop a method to manipulate attention while preserving predictions:
+Four diverse text corpora totaling 624,712 sentences:
+
+1. **Quora Question Pairs (QQP)**: 164,246 questions from Quora
+2. **Question-answering NLI (QNLI)**: 58,645 Wikipedia passages  
+3. **Wikipedia (Wiki)**: 203,736 random sentences from English Wikipedia
+4. **Toronto BookCorpus (Books)**: 198,085 sentences from online novels
+
+#### 2. Embedding Extraction
+
+**Model**: BERT-base uncased from HuggingFace Transformers
+- No fine-tuning or dataset-specific modifications
+- Used final layer (layer 12) hidden state of [CLS] token as sentence embedding
+- Results in 768-dimensional embedding for each sentence
+
+**Rationale**: This is the default method in HuggingFace pipelines and used in original BERT paper.
+
+**Validation**: Created UMAP visualization showing embeddings form highly coherent clusters (Figure 1).
+
+#### 3. Neuron Analysis Method
+
+**Neuron Definition**: A neuron is identified with a basis vector in the 768-dimensional space:
 
 ```
-Objective: minimize KL(attention_new || attention_target) 
-          + λ * task_loss
+x^(d)_l = 1 if l = d
+          0 otherwise
 ```
 
-Where:
-- `attention_target` is an adversarially chosen distribution
-- `task_loss` ensures predictions don't change
-- `λ` balances between attention manipulation and task performance
+**Finding Top Activating Sentences**:
+For a neuron/direction `v` and dataset `S`:
 
-**Implementation**: 
-- Fine-tune attention parameters (query/key matrices) while freezing other weights
-- Use gradient descent to find attention patterns that match target distribution
-- Target distributions tested: uniform, reversed, random
+```
+Top activating sentence for v = arg max_{x ∈ S} ⟨x, v⟩
+```
 
-#### 2. Gradient-Based Importance
+Where the dot product ⟨x, v⟩ is called the "projection score."
 
-As a comparison baseline, they use gradient-based saliency:
+**Analysis Process**:
+1. Randomly select neurons (basis vectors) from layer 12
+2. Also test random directions (random vectors in 768-d space)
+3. For each neuron/direction, find top 10 activating sentences per dataset
+4. Human annotators examine sentences for patterns
 
-**Input × Gradient**: `importance(token_i) = |embedding_i ⊙ ∂loss/∂embedding_i|`
+#### 4. Annotation Protocol
 
-This measures how much the model output would change with small perturbations to each token.
+**Interface Design**:
+- Shows 10 sentences in one of three conditions:
+  1. Top 10 for a neuron
+  2. Top 10 for a random direction  
+  3. Random 10 sentences (control)
+- Annotators know dataset but not condition
+- Annotators mark whether pattern exists and which sentences match it
 
-**Integrated Gradients**: More sophisticated version that integrates gradients along path from baseline to actual input.
+**Annotation Scope**:
+- 25 neurons (randomly selected)
+- 33 random directions
+- 29 random sentence sets
+- Two annotators per set for reliability
 
-#### 3. Erasure Analysis
+**Pattern Definition**:
+A pattern is any property shared by multiple sentences:
+- **Structural**: e.g., all same length, specific syntactic structure
+- **Lexical**: e.g., contain phrase variations like "coat of arms"
+- **Semantic**: e.g., all about a topic like "military conflict"
 
-Token erasure procedure:
-1. Remove token from input sequence
-2. Measure change in model prediction (confidence/accuracy)
-3. Tokens whose removal causes large changes are "important"
+Patterns serve as proxies for concepts the model may have learned.
 
-Compared erasure importance rankings with attention weight rankings.
+## Explaining the Illusion: Three Sources
 
-### Datasets and Tasks
+The authors identify three contributing factors:
 
-Experiments conducted on:
+### Source 1: Dataset Idiosyncrasy
 
-1. **MNLI** (Multi-Genre Natural Language Inference)
-   - Task: Determine if hypothesis entails/contradicts/neutral to premise
-   - Model: RoBERTa-base and RoBERTa-large
-   
-2. **SST-2** (Stanford Sentiment Treebank)
-   - Task: Binary sentiment classification
-   - Model: BERT-base and RoBERTa-base
+**Hypothesis**: QQP, QNLI, Wiki, and Books occupy distinct, non-overlapping regions of BERT's embedding space.
 
-3. **QQP** (Quora Question Pairs)
-   - Task: Determine if two questions are semantically equivalent
-   - Model: RoBERTa-base
+**Evidence**:
+1. **UMAP Visualization** (Figure 1): Sentences cluster neatly by dataset - the four datasets form distinct, separate clusters
 
-4. **FEVER** (Fact Extraction and VERification)
-   - Task: Verify claims against evidence
-   - Model: RoBERTa-base
+2. **Linear SVM Classification** (Figure 4): Trained classifier to distinguish datasets based on embeddings
+   - Achieves very high accuracy
+   - Shows datasets are easily separable in embedding space
 
-### Models Analyzed
+3. **Activation Range Overlap**: Only 38% of neuron/dataset pairs have overlapping activation ranges for top-10 sentences
 
-- **BERT-base**: 12 layers, 12 heads per layer
-- **RoBERTa-base**: Similar architecture to BERT-base
-- **RoBERTa-large**: 24 layers, 16 heads per layer
+**Implication**: If datasets occupy different regions, then moving along any direction will encounter different sentences from different datasets, leading to different apparent patterns.
 
-Analysis focused on:
-- Different attention heads in different layers
-- Averaged attention across heads/layers
-- Specific heads identified as "interpretable" in prior work
+**Schematic (Figure 3)**: Imagine an arrow (neuron direction) through embedding space. Red dots (Dataset A) and blue dots (Dataset B) are in different regions. The highest-activating red dots vs. blue dots will be semantically unrelated, even though they're all "high-activating."
 
-## Detailed Results
+### Source 2: Local Semantic Coherence
 
-### Quantitative Findings
+**Key Observation**: Top activating sentences show patterns from BOTH:
+- Local semantic clustering (nearby sentences are similar)
+- Global concept directions (some directions correlate with specific tokens/concepts)
 
-1. **Adversarial Manipulation Success Rates**
-   - Can change attention to uniform distribution with <2% accuracy drop
-   - Can reverse attention patterns (high↔low) with <3% accuracy drop
-   - Can randomize attention with minimal performance impact
+#### Global vs. Dataset-Level vs. Local Concepts
 
-2. **Attention-Gradient Correlation**
-   - Kendall's tau correlation: 0.15-0.35 (low)
-   - Pearson correlation: 0.20-0.45 (low to moderate)
-   - Varies by layer: later layers show slightly higher correlation
-   - Varies by head: most heads show poor correlation
+The paper introduces a taxonomy:
 
-3. **Erasure vs. Attention Agreement**
-   - Top-k token agreement (k=3): ~30-40%
-   - Top-k token agreement (k=5): ~35-45%
-   - Random chance would be ~15% (k=3), ~25% (k=5)
-   - Slight agreement but far from perfect alignment
+**Global Concepts**: Become increasingly prevalent along a linear trajectory through embedding space, starting from ANY point
+- Example: "math" - moving along direction increases math-related sentences
+- Detected by monotonic token frequency changes
 
-### Qualitative Observations
+**Dataset-Level Concepts**: Similar to global, but only meaningful within one dataset's region of embedding space
+- Direction works for that dataset but doesn't generalize
 
-1. **Attention Patterns Seem Interpretable**
-   - Attention to syntactic heads (e.g., verbs attend to subjects)
-   - Attention to semantic relations (e.g., entities to modifiers)
-   - Attention to punctuation and special tokens ([CLS], [SEP])
-   
-2. **But Patterns Are Misleading**
-   - Example: In MNLI, hypothesis words attend to premise words
-   - Looks like "alignment" between premise and hypothesis
-   - But manipulating these alignments doesn't affect predictions
-   - The model doesn't rely on attention for its reasoning
+**Local Concepts**: Emerge as clusters without any associated direction
+- Example: math sentences cluster together near "e=mc²"
+- No specific direction makes math more prevalent - it's just local grouping
 
-3. **Special Token Attention**
-   - [CLS] token often receives high attention
-   - Serves as "no-op" or aggregation point
-   - Not necessarily meaningful for interpretation
-   - Can be redistributed without affecting outputs
+####  Evidence for Global/Dataset-Level Concepts (Table 3)
+
+**Monotonic Token Analysis**: 
+- Examined 915 tokens appearing ≥100 times in all datasets
+- For each neuron/token pair, checked if token frequency changes monotonically across activation quintiles
+- Baseline probability of monotonicity by chance: 1.7%
+
+**Results**:
+- ~27% of neuron/token pairs show monotonic relationships within single datasets
+- Only 1.9% show monotonicity across ALL four datasets
+- Suggests most "concept directions" are dataset-specific, not global
+
+**Most Monotonic Tokens** (Table 4): Common function words and pronouns
+- Parenthesis "(", "can", "is", "are", "was", "that", "if", "were", "to", "would"
+- Suggests BERT learns some global directions for pervasive linguistic features
+
+#### Evidence for Local Concepts (Locality Score Analysis)
+
+**Hypothesis 2**: Annotators identify concepts from local semantic coherence, not directional information.
+
+**Test Method**:
+1. For each sentence `s` in top-10 activating for direction `p`:
+   - Find its k=10 nearest neighbors N_k(s) in original embedding space
+   - Compute dot products between s and its neighbors → D_{p,nearest}
+   - Compute dot products between all pairs of top-10 → D_{p,top}
+   - Compute dot products between top-10 and random sentences → D_{p,random}
+
+2. **Locality Score**: Jaccard similarity between histograms of D_{p,nearest} and D_{p,top}
+
+```
+L(h1, h2) = Σ_i min(h1(i), h2(i)) / Σ_i max(h1(i), h2(i))
+```
+
+**Interpretation**: 
+- High L → top activating sentences are close to each other in original space (local clustering)
+- Low L → top activating sentences are scattered (relying on direction, not locality)
+
+**Results** (Table 5):
+- Meaningful neurons: L = 0.026 (mean across datasets)
+- Meaningless neurons: L = 0.010  
+- p-value: 0.0004 (highly significant)
+
+**Conclusion**: Patterns found by annotators arise primarily from local geometry, not from the neuron direction itself.
+
+#### Outlier Analysis
+
+**Concern**: Maybe patterns only exist for a small set of weird outlier sentences?
+
+**Analysis on QQP**:
+- Top 3 most distant (outlier) sentences each activate 32-56 neurons
+- Most distant 1% of sentences account for 48% of all top activations
+- Shows lack of diversity among outliers
+
+**However**: 
+- Out of 7,680 top-ten activating slots, there are 4,551 unique sentences
+- Illusion persists even when removing most distant 1% or 10% of sentences
+- Not purely an outlier phenomenon
+
+### Source 3: Annotator Error/Bias
+
+**Evidence** (Table 6):
+- Annotators disagree on whether sentences contain patterns
+- Wide variation in individual annotator tendency to find patterns:
+  - Annotator 0: Found patterns in 90% of cases
+  - Annotator 3: Found patterns in 56% of cases
+  - Annotator 5: Found patterns in 160% of cases (multiple patterns per set!)
+
+**Implication**: Some "patterns" may reflect annotator imagination rather than objective properties of the sentences.
+
+## Sample Annotated Patterns (Table 2)
+
+**QQP**: Nested quotes, Colors, Mathematics, Military conflict, Population statistics, Relationship advice, School exam questions, Questions of comparison, Programming
+
+**QNLI**: Biology, Geography, Technology, Numbers and dates, Military conflict, Population statistics, War history, Windows 8, Etymology
+
+**Wiki**: Direct statement of fact, Music, Sporting, Age distribution, Television shows, Olympic facts, Legalese, Measurements, School districts
+
+**Books**: Interpersonal relationships, Nature, Quoted speech, Spanish, Sentence fragments, Medieval Europe, Very long sentences, Flirtation
+
+(Full list of all patterns in Table 7 of Appendix)
 
 ## Implications and Discussion
 
 ### For Interpretability Research
 
-1. **Attention ≠ Explanation**
-   - Attention weights should not be used alone for interpretation
-   - Need to validate with counterfactual or gradient-based methods
-   - Correlation with linguistic structure doesn't imply causal role
+**Primary Recommendation**: **Test interpretability hypotheses on multiple datasets**
 
-2. **Need for Faithful Explanations**
-   - Explanation should reflect actual model computation
-   - Attention can be part of story but not whole story
-   - Gradient-based methods are more faithful but less intuitive
+The core lesson is that an interpretation that seems valid on one dataset may completely fail to generalize. This has several implications:
 
-3. **Human Interpretation Bias**
-   - Humans over-interpret structured patterns
-   - Confirmation bias in finding "meaningful" attention
-   - Need objective evaluation metrics
+1. **Validation is Essential**
+   - Never trust patterns found on a single dataset
+   - Test on at least 2-3 diverse datasets
+   - Look for consistency across data distributions
+
+2. **Distinguish Local from Global Concepts**
+   - Local patterns (clustering) ≠ directional concepts
+   - Dataset-level directions ≠ universal representations
+   - Need to characterize geometry of concept representation
+
+3. **Be Skeptical of Intuitive Patterns**
+   - Human tendency to see patterns even in randomness
+   - Annotator bias significantly affects interpretation
+   - Use objective metrics alongside human judgment
+
+4. **Consider Dataset Bias**
+   - Common NLP corpora are NOT representative of all English
+   - Different corpora occupy different embedding regions
+   - Model representations may be dataset-specific
 
 ### For Model Understanding
 
-1. **Attention's Role in Transformers**
-   - Attention computes representations but isn't sole mechanism
-   - Feed-forward layers and residual connections matter
-   - Later layer MLPs may "override" attention patterns
+1. **What Neurons Actually Encode**
+   - Individual neurons don't have simple, universal meanings
+   - Activations reflect complex interaction of:
+     - Local clustering in embedding space
+     - Dataset-specific patterns
+     - Some global concept directions
+   - Meaning is context-dependent
 
-2. **Where Does Computation Happen?**
-   - Not just in attention mechanism
-   - Value projections and MLPs are critical
-   - Attention might be more about routing than reasoning
+2. **Geometry of BERT's Representation Space**
+   - Strong local semantic coherence (similar sentences cluster)
+   - Some global directions exist (function words, pronouns)
+   - Most apparent "concept directions" are dataset-specific
+   - Embedding space partitioned by data source
 
-### Limitations Acknowledged
+3. **Implications for Concept-Based Methods**
+   - Using concept directions for bias mitigation could have unintended effects
+   - Must validate directions across multiple contexts
+   - Dataset-specific directions won't generalize to new inputs
 
-1. **Scope of Analysis**
-   - Focused on BERT/RoBERTa
-   - Other architectures (GPT, T5) may differ
-   - Task-specific vs. general findings unclear
+### Methodological Recommendations
 
-2. **Alternative Interpretability Methods**
-   - Didn't comprehensively evaluate all methods
-   - Probing classifiers, causal interventions not tested
-   - Gradient-based methods also have limitations
+1. **For Researchers Analyzing Neurons**:
+   - Use multiple diverse datasets
+   - Measure locality scores to distinguish local vs. directional patterns
+   - Test for monotonic token frequency changes
+   - Employ multiple annotators and measure agreement
 
-3. **Attention Might Matter in Some Cases**
-   - Certain heads in certain layers might be more faithful
-   - Copy mechanisms, coreference might rely on attention
-   - Need task-specific analysis
+2. **For Building Interpretability Tools**:
+   - Provide warnings about single-dataset analysis
+   - Automatically test across multiple corpora
+   - Visualize embedding space geometry
+   - Show uncertainty in concept labels
+
+3. **For Practitioners**:
+   - Don't assume neuron interpretations from research papers generalize
+   - Test on your specific data distribution
+   - Use interpretations as hypotheses, not facts
+   - Validate with multiple methods (probing, interventions, etc.)
 
 ## Related Work
 
-### Prior Work on Attention Interpretability
+### Prior Work on Neuron Interpretability
 
-1. **Attention as Explanation** (Jain & Wallace, 2019; Wiegreffe & Pinter, 2019)
-   - Earlier debate on whether attention explains predictions
-   - Mixed results: sometimes correlates, sometimes doesn't
-   - This paper extends analysis to BERT specifically
+**Analyzing Neurons via Max-Activating Inputs**:
+- Zhou et al. (2015), Bau et al. (2017): Found neurons responding to specific objects in images
+- Szegedy et al. (2014): Convolutional networks have neurons for semantically related inputs
+- Zeiler & Fergus (2014): Visualized top activating image patches
+- Olah et al. (2017): Compared max-activating dataset images vs. synthesized images
 
-2. **BERTology Literature** 
-   - Clark et al. (2019): Attention heads capture linguistic features
-   - Tenney et al. (2019): BERT layers encode linguistic hierarchy
-   - This paper argues these patterns may not be explanatory
+**For Language Models**:
+- Na et al. (2019): Looked for patterns in max-activating sentences
+- Dalvi et al. (2019): Compared max-activation method to probing classifiers
+- Poerner et al. (2018): Generated inputs to maximize neuron activation
+- Durrani et al. (2020): Found linguistic elements localized to individual neurons
 
-3. **Gradient-Based Attribution**
-   - Sundararajan et al. (2017): Integrated Gradients
-   - Smilkov et al. (2017): SmoothGrad
-   - Alternative to attention for understanding importance
+**This paper's contribution**: First to systematically show that max-activation patterns DON'T generalize across datasets.
 
-### Alternative Interpretability Approaches
+### Embedding Space Structure
 
-1. **Probing Classifiers** (Conneau et al., 2018)
-   - Train classifier on hidden states to test what's encoded
-   - Doesn't directly explain predictions
-   
-2. **Causal Interventions** (Vig et al., 2020)
-   - Directly modify attention and measure effects
-   - Related to adversarial approach in this paper
+**Local Structure**:
+- Bengio et al. (2003): Nearest neighbors in embedding space are semantically similar
+- Aharoni & Goldberg (2020): BERT representations can disambiguate datasets
 
-3. **Mechanistic Interpretability** (Olah et al., 2020)
-   - Reverse-engineer circuits in neural networks
-   - More recent direction in transformer understanding
+**Global Directions**:
+- Mikolov et al. (2013): Word2Vec directions encode semantic relationships (king-man+woman=queen)
+- Bolukbasi & Chang (2016): Bias directions in word embeddings
+- Li et al. (2015): Visualizing neural model representations
+- Olah et al. (2020): Concept directions in vision models
+- Vig et al. (2020): Causal mediation analysis for gender bias
+
+**This paper's contribution**: Distinguishes global, dataset-level, and local concepts; shows most apparent directions are dataset-specific.
+
+### Probing and Linguistic Structure
+
+- Tenney et al. (2019): Probing for sentence structure in contextualized embeddings
+- Manning et al. (2020): Emergent linguistic structure in self-supervised neural networks
+- Different from this work: Probing tests what CAN be extracted, not what neurons natively encode
+
+### Bias and Fairness
+
+- Bolukbasi & Chang (2016), Manzini et al. (2019), Kaneko & Bollegala (2019): Using concept directions to measure/mitigate bias
+
+**Warning from this paper**: Using concept directions without validating across datasets could have unintended effects.
+
+## Limitations and Future Work
+
+### Acknowledged Limitations
+
+1. **Scope**:
+   - Only studied BERT-base uncased
+   - Only examined layers 2, 7, and 12 (final layer most thoroughly)
+   - Only used [CLS] token embeddings (other methods like mean pooling not tested)
+
+2. **Annotation**:
+   - Human annotators have biases
+   - "Pattern" definition is somewhat subjective  
+   - Only used 2 annotators per set (more would be better)
+
+3. **Datasets**:
+   - Only tested 4 specific corpora
+   - Need to test on more diverse data sources
+   - Unclear how results generalize to non-English text
+
+### Suggested Future Directions
+
+1. **Broader Model Coverage**:
+   - Other sentence models (Sentence-BERT, USE, etc.)
+   - Token-level embeddings instead of sentence-level
+   - Other layers (systematic study of all 12 layers)
+   - Other model families (GPT, T5, RoBERTa, etc.)
+
+2. **Other Modalities**:
+   - Do similar illusions occur in vision transformers?
+   - What about multimodal models?
+   - Audio, graph data, etc.?
+
+3. **Geometric Characterization**:
+   - More rigorous mathematical analysis of embedding space
+   - Better methods to distinguish local vs. global vs. dataset concepts
+   - Formal criteria for when a direction is "meaningful"
+
+4. **Cross-Dataset Validity**:
+   - Framework for testing interpretation validity
+   - Methods to find truly global concept directions
+   - Understanding when/why interpretations transfer
+
+5. **Practical Tools**:
+   - Automated systems to test interpretations across datasets
+   - Visualization tools showing embedding space partitioning
+   - Calibrated confidence scores for concept labels
 
 ## Critical Analysis
 
 ### Strengths
 
-1. **Rigorous Experimental Design**
-   - Multiple tasks, datasets, models
-   - Adversarial framework is clever and convincing
-   - Multiple importance baselines (gradients, erasure)
+1. **Novel and Important Finding**
+   - First systematic demonstration that neuron interpretations don't generalize
+   - Challenges common practice in interpretability research
+   - Has immediate practical implications
 
-2. **Clear Communication**
-   - Well-motivated problem
-   - Accessible to practitioners
-   - Important message for community
+2. **Rigorous Experimental Design**
+   - Multiple datasets with different characteristics
+   - Controlled comparison (neurons vs. random directions vs. random sentences)
+   - Multiple annotators for reliability
+   - Both qualitative and quantitative analysis
 
-3. **Reproducible**
-   - Methods clearly described
-   - Standard models and datasets
-   - Can be replicated by others
+3. **Thorough Explanation**
+   - Doesn't just identify the problem
+   - Provides detailed analysis of causes (dataset idiosyncrasy, local coherence, annotator bias)
+   - Introduces useful taxonomy (global/dataset-level/local concepts)
+
+4. **Clear Presentation**
+   - Compelling opening example (neuron 221)
+   - Excellent visualizations (UMAP, confusion matrix, locality distributions)
+   - Well-structured from observation to explanation
+
+5. **Actionable Recommendations**
+   - Clear advice: test on multiple datasets
+   - Provides specific metrics (locality score, monotonicity)
+   - Acknowledges limitations honestly
 
 ### Potential Weaknesses
 
-1. **Adversarial Training Details**
-   - How sensitive to hyperparameter λ?
-   - How many steps needed for convergence?
-   - Could provide more ablations
+1. **Limited Model Coverage**
+   - Only BERT-base (what about BERT-large? RoBERTa? GPT?)
+   - Only final layer studied in depth
+   - Only one type of embedding extraction ([CLS] token)
 
-2. **Gradient Methods as Ground Truth**
-   - Assumes gradients are "correct" importance
-   - Gradients have their own issues (saturation, sharp minima)
-   - Both might be incomplete views
+2. **Dataset Selection**
+   - Four datasets may not be enough
+   - All are English, relatively formal text
+   - What about: social media, code, dialogue, non-English?
 
-3. **Attention Might Still Be Useful**
-   - Even if not faithful, could be pedagogically valuable
-   - Might capture some aspects of computation
-   - Shouldn't completely dismiss attention analysis
+3. **Annotation Subjectivity**
+   - High inter-annotator variability (Table 6)
+   - "Pattern" definition is loose
+   - Some annotators find 1.6x more patterns than others
 
-## Open Questions and Future Directions
+4. **Locality Score Interpretation**
+   - Mean locality scores are quite low (0.026 vs 0.010)
+   - Effect size is small in absolute terms
+   - Statistical significance doesn't mean practical importance
 
-1. **Which Interpretability Methods ARE Faithful?**
-   - If not attention or gradients, then what?
-   - Need comprehensive evaluation framework
-   - Formal criteria for faithfulness
+5. **Missing Comparisons**
+   - Doesn't compare to other interpretability methods (probing, causal intervention)
+   - Doesn't test whether ANY method finds generalizable patterns
+   - Could the datasets themselves be the problem, not the neuron analysis method?
 
-2. **Task and Architecture Dependence**
-   - Does illusion occur in GPT, T5, other models?
-   - What about vision transformers?
-   - Are some tasks/domains different?
+6. **Practical Alternatives Not Explored**
+   - Paper identifies problem but doesn't propose solutions
+   - How SHOULD we interpret neurons if this method doesn't work?
+   - What methods DO produce reliable interpretations?
 
-3. **Can We Make Attention More Interpretable?**
-   - Training objectives that encourage faithful attention?
-   - Architectural changes (e.g., sparse attention)?
-   - Explicit alignment with causality?
+### Questions Raised
 
-4. **Human Studies**
-   - Do practitioners actually misinterpret attention?
-   - What are consequences of misinterpretation?
-   - Can we train people to be more careful?
+1. **Are there ANY meaningful neurons?**
+   - Paper shows most neurons don't have simple universal meanings
+   - But maybe some do? Were any found that are consistent across datasets?
+
+2. **Is this specific to BERT?**
+   - Different architectures might have different properties
+   - Explicit multitask models might develop more universal representations
+
+3. **What about fine-tuned models?**
+   - All experiments on pre-trained, not fine-tuned BERT
+   - Task-specific fine-tuning might create more interpretable neurons
+
+4. **Token-level vs. Sentence-level**
+   - Paper uses [CLS] token for sentence representation
+   - Individual token representations might be more/less interpretable
+
+5. **Can we fix this?**
+   - Training objectives that encourage universal concepts?
+   - Architectural changes?
+   - Or is this fundamental to how neural networks learn?
 
 ## Practical Takeaways
 
 ### For Researchers
 
-1. **Don't rely on attention alone** for model interpretation
-2. **Validate interpretations** with multiple methods (gradients, erasure, probing)
-3. **Be skeptical** of patterns that "seem meaningful"
-4. **Use causal interventions** to test explanations
-5. **Report correlations** between different importance measures
+**DO**:
+- ✅ Test interpretability hypotheses on multiple diverse datasets
+- ✅ Use locality scores to distinguish local clustering from directional concepts
+- ✅ Measure monotonic token frequency changes to detect global directions
+- ✅ Report inter-annotator agreement
+- ✅ Visualize embedding space geometry
+- ✅ Consider dataset idiosyncrasy in your analysis
+
+**DON'T**:
+- ❌ Trust neuron interpretations from a single dataset
+- ❌ Assume patterns found by human annotators reflect true model concepts
+- ❌ Ignore the possibility of local semantic coherence
+- ❌ Use concept directions for applications (e.g., bias mitigation) without cross-dataset validation
 
 ### For Practitioners
 
-1. **Attention visualizations** are not sufficient for debugging
-2. **Model behavior** requires deeper investigation
-3. **Gradient-based methods** are more reliable (but still imperfect)
-4. **Domain knowledge** should guide interpretation, not just attention
-5. **Test counterfactuals** to verify understanding
+**When analyzing models**:
+- Test on your specific data distribution (don't assume research findings generalize)
+- Use multiple interpretability methods, not just neuron activation analysis
+- Be skeptical of intuitive patterns - validate quantitatively
+- Consider that different data sources may activate different "concepts"
+
+**When building systems**:
+- Don't rely on single neuron activations for decisions
+- If using concept directions, validate across multiple contexts
+- Include multiple datasets in testing pipelines
+- Monitor how interpretations change across data distributions
 
 ### For Tool Developers
 
-1. **Provide multiple views** of model behavior
-2. **Include warnings** about attention limitations
-3. **Make gradient computation** easy and accessible
-4. **Support counterfactual analysis**
-5. **Educate users** about interpretation pitfalls
+**Interpretability tools should**:
+- Automatically test across multiple datasets
+- Provide confidence scores/uncertainty estimates
+- Show embedding space visualizations
+- Warn users about single-dataset limitations
+- Include locality metrics in neuron descriptions
+- Allow comparison across data sources
+
+## Key Equations and Metrics
+
+### Neuron Representation
+```
+Basis vector: x^(d)_l = 1 if l=d, 0 otherwise
+```
+
+### Projection Score
+```
+Score(sentence, direction) = ⟨embedding, direction⟩
+```
+
+### Locality Score
+```
+L(h1, h2) = Σ_i min(h1(i), h2(i)) / Σ_i max(h1(i), h2(i))
+```
+Measures overlap between histogram of distances to nearest neighbors vs. distances to top-activating sentences.
+
+### Monotonicity Test
+```
+For neuron n and token t, check if token frequency changes
+monotonically across activation quintiles.
+Baseline probability: 2/5! = 1.7%
+Observed: ~27% for single datasets, ~2% across all datasets
+```
+
+## Conclusion
+
+This paper makes a crucial contribution to neural network interpretability by demonstrating that **interpretations that seem valid on one dataset may be completely invalid on another**. The "interpretability illusion" arises from:
+1. Datasets occupying distinct regions of embedding space
+2. Local semantic coherence creating apparent patterns
+3. Human tendency to see patterns
+
+The key lesson: **always validate interpretability findings across multiple diverse datasets**. Patterns that don't generalize are likely spurious.
+
+Despite revealing this illusion, the paper also provides evidence that BERT's embedding space DOES contain some structure:
+- Global concept directions exist (for common linguistic features)
+- Strong local semantic coherence (similar sentences cluster)
+- Dataset-level patterns (though these don't generalize)
+
+The challenge for future work is developing methods that can reliably distinguish meaningful, generalizable concepts from dataset-specific or locally-coherent patterns.
 
 ## Code and Data Availability
 
-- Code: Expected to be released by authors (check paper repository)
-- Models: Standard HuggingFace models (BERT, RoBERTa)
-- Data: Standard GLUE benchmark datasets
-- Should be fully reproducible with public resources
+- **Model**: BERT-base uncased from HuggingFace Transformers
+- **Datasets**: All publicly available (QQP, QNLI, Wikipedia, BookCorpus)
+- **Code**: Not explicitly mentioned in paper (check authors' GitHub)
+- **Annotations**: Appear to be manual (not released as dataset)
 
-## Citations and References
+## Citations
 
-Key papers cited:
-- Jain & Wallace (2019): Attention is not Explanation
-- Wiegreffe & Pinter (2019): Attention is not not Explanation
-- Clark et al. (2019): What Does BERT Look At?
-- Vaswani et al. (2017): Attention is All You Need
-- Sundararajan et al. (2017): Axiomatic Attribution for Deep Networks
+Key papers referenced:
+- Devlin et al. (2018): Original BERT paper
+- Bau et al. (2017): Network dissection for vision
+- Tenney et al. (2019): Probing for linguistic structure  
+- Aharoni & Goldberg (2020): Dataset clustering in pretrained LMs
+- Bolukbasi & Chang (2016): Debiasing word embeddings
+- Olah et al. (2020): Circuits in vision transformers
 
-## Appendix: Mathematical Details
+## Appendix Notes
 
-### Attention Mechanism Recap
+**Table 7**: Complete list of all annotated patterns across datasets (not reproduced here but available in paper)
 
-Standard multi-head attention:
-```
-Q = XW_Q, K = XW_K, V = XW_V
-Attention(Q,K,V) = softmax(QK^T / √d_k) V
-```
+**Normalization**: Authors chose to use raw (un-normalized) embeddings to stay closer to how BERT actually uses them. Most vector norms concentrated around 14 ≈ √768/2.
 
-Where:
-- X: input embeddings
-- W_Q, W_K, W_V: learned projection matrices
-- d_k: dimension of key vectors
-
-### Adversarial Optimization
-
-Formally, the adversarial attention objective is:
-
-```
-min_{W_Q, W_K} α · D_KL(A_adv || A_target) + (1-α) · L_task
-
-subject to: A_adv = softmax(Q_adv K_adv^T / √d_k)
-            Q_adv = XW_Q, K_adv = XW_K
-```
-
-Where:
-- A_adv: adversarially modified attention
-- A_target: target attention distribution (uniform, reversed, etc.)
-- L_task: task loss (cross-entropy for classification)
-- α: balancing hyperparameter
-
-### Importance Metrics
-
-**Input × Gradient:**
-```
-I_i^IxG = ||e_i ⊙ ∂L/∂e_i||
-```
-
-**Integrated Gradients:**
-```
-I_i^IG = ||e_i ⊙ ∫_{α=0}^1 ∂f(e_0 + α(e - e_0))/∂e_i dα||
-```
-
-**Attention:**
-```
-I_i^Attn = mean over heads and layers of A[:,i]
-```
-
-**Erasure:**
-```
-I_i^Erase = |f(x) - f(x \ {x_i})|
-```
-
-### Correlation Metrics
-
-**Kendall's Tau:**
-Measures rank correlation between two importance rankings. Robust to outliers, ranges from -1 to 1.
-
-**Pearson's r:**
-Measures linear correlation between importance scores. Sensitive to scale, ranges from -1 to 1.
-
-Both used to compare attention weights with gradient/erasure importance.
+**Key Figure Numbers**:
+- Figure 1: UMAP visualization showing dataset clustering
+- Figure 3: Schematic of how dataset separation causes illusion  
+- Figure 4: Linear SVM confusion matrix
+- Figure 5: Global vs. local concepts illustration
+- Figure 6: Token frequency monotonicity examples
+- Figure 7: Locality score distributions
