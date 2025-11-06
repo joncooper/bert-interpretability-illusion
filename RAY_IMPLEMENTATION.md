@@ -1,60 +1,372 @@
 # Ray Implementation Guide for BERT Interpretability Experiments
 
-**Document Version:** 1.0
+**Document Version:** 2.0 (Revised for Realistic Use Case)
 **Last Updated:** 2025-11-06
 **Author:** Claude Code
-**Purpose:** Architectural design for implementing distributed computing with Ray in the BERT interpretability illusion project
+**Purpose:** Guide for using Ray to offload GPU work from Mac to home PC
 
 ---
 
 ## Table of Contents
 
-1. [Executive Summary](#executive-summary)
-2. [Ray Framework Overview](#ray-framework-overview)
-3. [Current Computational Bottlenecks](#current-computational-bottlenecks)
-4. [Ray Architecture Proposal](#ray-architecture-proposal)
-5. [Implementation Details by Component](#implementation-details-by-component)
-6. [Performance Optimization Strategy](#performance-optimization-strategy)
-7. [Migration Path](#migration-path)
-8. [Best Practices and Considerations](#best-practices-and-considerations)
-9. [Resource Requirements](#resource-requirements)
-10. [Monitoring and Debugging](#monitoring-and-debugging)
-11. [References](#references)
+1. [Do You Actually Need Ray?](#do-you-actually-need-ray)
+2. [Realistic Use Case: Remote GPU Access](#realistic-use-case-remote-gpu-access)
+3. [Simple Setup: Mac → Home PC](#simple-setup-mac--home-pc)
+4. [Ray Client vs. Ray Jobs](#ray-client-vs-ray-jobs)
+5. [Alternative Simpler Solutions](#alternative-simpler-solutions)
+6. [If You Really Do Need Scale...](#if-you-really-do-need-scale)
+7. [References](#references)
 
 ---
 
-## Executive Summary
+## Do You Actually Need Ray?
 
-### Problem Statement
+### The Reality Check
 
-The BERT interpretability experiments in this project require approximately **10 hours** of computation on a single high-end machine (RTX 3090 GPU, 32-core CPU). The workload consists of:
+Based on your actual setup:
+- **Your hardware:** M4 MacBook Pro (work) + 4070 Ti Super (home)
+- **Your experience:** M4 MBP runs the experiments fine
+- **Actual computation:** Doc/REPLICATION_PLAN.md estimates 4-8 hours for full embedding generation on 625K sentences
 
-- **Embedding extraction:** 625K sentences across 4 datasets (~2-3 hours)
-- **Neuron analysis:** 25 neurons × 4 datasets × multiple metrics (~30 minutes)
-- **Locality computation:** KNN queries and histogram generation (~1-2 hours)
-- **Monotonicity analysis:** 91,500 token-neuron-dataset triples (~3-4 hours)
-- **UMAP visualization:** Dimensionality reduction on 625K vectors (~20 minutes)
+**Honest assessment: You probably don't need Ray for this project.**
 
-### Solution: Distributed Computing with Ray
+### Why Ray Might Be Overkill
 
-[Ray](https://www.ray.io/) is an open-source unified framework for scaling AI and Python applications that provides simple, universal APIs for building distributed applications. By implementing Ray, we can achieve:
+1. **Single GPU is sufficient:** The 4070 Ti Super has 16GB VRAM - plenty for BERT inference
+2. **M4 Mac already works:** You said it runs fine on your laptop
+3. **Not truly distributed:** You have 2 machines, not 20
+4. **Complexity overhead:** Ray adds debugging complexity and network dependencies
+5. **Simpler alternatives exist:** SSH, Remote Desktop, or just running locally
 
-- **5-8x overall speedup** through distributed computation
-- **8-12x speedup** for embedding extraction (multi-GPU parallelization)
-- **25-100x speedup** for neuron analysis (embarrassingly parallel tasks)
-- **10-16x speedup** for locality and monotonicity computations (distributed CPU workloads)
+### When You *Would* Need Ray
 
-### Key Benefits
+You'd benefit from Ray if:
+- ✅ Running the same experiment across 100s of hyperparameter combinations
+- ✅ Processing millions of sentences (not 625K)
+- ✅ Need to utilize multiple GPUs across multiple machines simultaneously
+- ✅ Building a production service that needs auto-scaling
+- ✅ Sharing compute resources across a team
 
-1. **Horizontal Scalability:** Scale from a laptop to a cluster with minimal code changes
-2. **Resource Efficiency:** Optimal GPU/CPU utilization across multiple machines
-3. **Fault Tolerance:** Automatic recovery from failures with checkpointing
-4. **Developer Experience:** Pythonic API with minimal refactoring required
-5. **Cost Optimization:** Reduced wall-clock time enables faster iteration and experimentation
+### What You Probably Actually Want
+
+**Option 1: Just use the M4 Mac**
+- It works fine (your own assessment)
+- No network complexity
+- Easiest debugging
+
+**Option 2: SSH into home PC when you need GPU**
+```bash
+# From Mac at work
+ssh home-pc
+cd ~/bert-interpretability-illusion
+uv run python extract_embeddings.py
+# Let it run, detach with tmux/screen
+```
+
+**Option 3: Remote development (VS Code Remote-SSH)**
+- Edit code on Mac
+- Execute on home PC
+- No Ray needed
+
+**Option 4 (last resort): Ray for remote execution**
+- If you really want to submit jobs from Mac that run on home PC
+- Most complex setup
+- Only worth it if other options don't fit your workflow
 
 ---
 
-## Ray Framework Overview
+## Realistic Use Case: Remote GPU Access
+
+If you've decided you genuinely want Ray (after considering simpler alternatives above), here's the realistic setup for your actual use case.
+
+### Your Actual Scenario
+
+```
+┌─────────────────┐                    ┌──────────────────┐
+│  Mac (Work)     │                    │  Home PC         │
+│  - M4 chip      │  ─── Internet ──>  │  - 4070 Ti Super │
+│  - Dev env      │                    │  - Ray cluster   │
+│  - Submit jobs  │                    │  - Runs jobs     │
+└─────────────────┘                    └──────────────────┘
+```
+
+**Goal:** Submit BERT embedding extraction from Mac, execute on home PC's GPU
+
+**Challenges:**
+1. Home PC must be reachable from internet (port forwarding/VPN)
+2. Connection stability (if connection drops, job might fail)
+3. Debugging across machines is harder
+
+### Computation Profile (Based on doc/REPLICATION_PLAN.md)
+
+| Task | Estimated Time | GPU Needed? | RAM Needed |
+|------|---------------|-------------|------------|
+| Full embedding extraction (625K) | 4-8 hours | Yes (optional but 10-20x faster) | 32GB+ |
+| Neuron analysis | Minutes | No | 16GB |
+| Locality computation | Minutes-Hours | No | 32GB+ |
+| UMAP visualization | Minutes | No | 32GB+ |
+
+**Reality:** The M4 Mac has unified memory and strong CPU. The 4070 Ti Super would mainly help with embedding extraction IF you're running the full 625K sentences.
+
+---
+
+## Simple Setup: Mac → Home PC
+
+If you've decided Ray is worth it, here's the minimal setup.
+
+### Step 1: Set Up Ray on Home PC
+
+```bash
+# On home PC (Windows/Linux with 4070 Ti Super)
+# Install Ray
+pip install "ray[default]"
+
+# Start Ray head node
+ray start --head --port=6379 --dashboard-port=8265
+
+# Note the output - it will show something like:
+# Ray runtime started.
+# To connect from another machine: ray.init(address='192.168.1.100:6379')
+```
+
+### Step 2: Make Home PC Accessible
+
+**Option A: Tailscale/Zerotier (Easiest and Secure)**
+```bash
+# Install Tailscale on both machines
+# Get your home PC's Tailscale IP (e.g., 100.x.x.x)
+# No port forwarding needed!
+```
+
+**Option B: SSH Tunnel (Simple)**
+```bash
+# From Mac, create SSH tunnel
+ssh -L 10001:localhost:10001 -L 8265:localhost:8265 user@home-pc
+
+# Now Ray Client can connect via localhost
+```
+
+**Option C: Direct Internet (Requires router setup)**
+- Port forward 10001 (Ray Client) on your router
+- Know your home's external IP or use Dynamic DNS
+- Security risk - use with VPN or restrict by IP
+
+### Step 3: Connect from Mac
+
+**Using Ray Client (Interactive):**
+```python
+import ray
+
+# Connect to home PC
+# Replace with your home PC's IP (Tailscale, VPN, or public IP)
+ray.init("ray://100.x.x.x:10001")  # Ray Client port
+
+# Now define and run GPU tasks remotely
+@ray.remote(num_gpus=1)
+def extract_embeddings_batch(sentences):
+    import torch
+    from transformers import AutoModel, AutoTokenizer
+
+    model = AutoModel.from_pretrained("bert-base-uncased").cuda()
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+
+    inputs = tokenizer(sentences, return_tensors="pt", padding=True, truncation=True)
+    inputs = {k: v.cuda() for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    return outputs.last_hidden_state[:, 0, :].cpu().numpy()
+
+# This runs on your home PC's GPU!
+result = ray.get(extract_embeddings_batch.remote(["test sentence"]))
+```
+
+**Important Limitations:**
+- Ray Client requires stable connection
+- Jobs terminate if connection lost >30 seconds
+- Not ideal for long-running tasks (4-8 hour embedding extraction)
+
+---
+
+## Ray Client vs. Ray Jobs
+
+### Ray Client: Interactive Remote Execution
+
+**Best for:**
+- Short tasks (minutes)
+- Interactive development
+- Real-time feedback
+
+**Setup:**
+```python
+# Mac
+ray.init("ray://home-pc:10001")
+
+@ray.remote(num_gpus=1)
+def quick_task():
+    # Runs on home PC
+    pass
+
+result = ray.get(quick_task.remote())
+```
+
+**Drawbacks:**
+- Connection must stay alive
+- Mac must stay connected for entire execution
+- Not good for 4-8 hour jobs
+
+### Ray Jobs: Submit-and-Forget
+
+**Best for:**
+- Long-running tasks (hours)
+- Batch processing
+- Don't need real-time interaction
+
+**Setup:**
+```bash
+# On Mac: Create a script for the home PC to run
+cat > embedding_job.py <<'EOF'
+import ray
+import numpy as np
+from transformers import AutoModel, AutoTokenizer
+
+ray.init(address="auto")  # Auto-connect to local Ray cluster
+
+@ray.remote(num_gpus=1)
+def extract_embeddings():
+    # Your embedding extraction code
+    # This can run for hours
+    pass
+
+result = ray.get(extract_embeddings.remote())
+np.save("/path/to/results.npy", result)
+EOF
+
+# Submit job to home PC (via SSH or Ray Jobs API)
+ray job submit --address http://home-pc:8265 \
+  --working-dir . \
+  -- python embedding_job.py
+
+# Disconnect Mac - job keeps running!
+# Check status later:
+ray job status <job-id>
+```
+
+**Benefits:**
+- Disconnect after submission
+- Job continues running
+- Better for long tasks
+
+---
+
+## Alternative Simpler Solutions
+
+Before investing time in Ray setup, consider these simpler approaches:
+
+### 1. Just Use the M4 Mac
+
+You already said it works fine. The M4 has:
+- Strong CPU performance
+- Unified memory (up to 128GB on Max models)
+- No network complexity
+- Easy debugging
+
+**When to use:** Most of the time, honestly.
+
+### 2. SSH + tmux/screen
+
+```bash
+# From Mac
+ssh home-pc
+
+# Start tmux session
+tmux new -s bert-experiments
+
+# Run your experiment
+cd ~/bert-interpretability-illusion
+uv run python extract_embeddings.py
+
+# Detach: Ctrl-B then D
+# Job keeps running!
+
+# Later: reattach
+tmux attach -t bert-experiments
+```
+
+**Benefits:**
+- Simple, no new tools
+- Reliable
+- Easy to check progress
+
+### 3. VS Code Remote-SSH
+
+1. Install "Remote - SSH" extension in VS Code
+2. Connect to home PC
+3. Edit files locally, execute remotely
+4. Integrated terminal runs on home PC
+
+**Benefits:**
+- Familiar IDE
+- No mental model change
+- Terminal is already remote
+
+### 4. Jupyter Notebook on Home PC
+
+```bash
+# On home PC
+uv run jupyter lab --no-browser --port=8888
+
+# On Mac (SSH tunnel)
+ssh -L 8888:localhost:8888 home-pc
+
+# Open http://localhost:8888 on Mac
+# Runs on home PC's GPU!
+```
+
+**Benefits:**
+- Interactive
+- Visualizations work
+- Can disconnect (with caveats)
+
+---
+
+## If You Really Do Need Scale...
+
+If you later find yourself needing true distributed computing (multiple GPUs, multiple machines, hundreds of experiments), the original massive Ray implementation is below for reference.
+
+The scenarios where this becomes relevant:
+- Hyperparameter sweeps (100s of model configurations)
+- Scaling to millions of sentences
+- Multiple GPUs across multiple machines
+- Production deployment with auto-scaling
+
+### Quick Reference: Distributed Ray Patterns
+
+*See "Appendix: Advanced Distributed Patterns" section below for the full implementation guide.*
+
+---
+
+## References
+
+### Ray Documentation - Remote Execution
+- [Ray Client Documentation](https://docs.ray.io/en/latest/cluster/running-applications/job-submission/ray-client.html)
+- [Ray Jobs API](https://docs.ray.io/en/latest/cluster/running-applications/job-submission/index.html)
+- [Ray Core Walkthrough](https://docs.ray.io/en/latest/ray-core/walkthrough.html)
+
+### Simpler Alternatives
+- [tmux basics](https://github.com/tmux/tmux/wiki/Getting-Started)
+- [VS Code Remote-SSH](https://code.visualstudio.com/docs/remote/ssh)
+- [Tailscale](https://tailscale.com/) - Easy VPN for home lab access
+- [Zerotier](https://www.zerotier.com/) - Alternative to Tailscale
+
+---
+
+# Appendix: Advanced Distributed Patterns
+
+*The following sections describe large-scale distributed Ray implementations for reference. These are likely overkill for a 2-machine setup but useful if your needs grow.*
+
+## Original Ray Framework Overview
 
 ### Core Primitives
 
