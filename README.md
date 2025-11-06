@@ -14,6 +14,7 @@ We conduct experiments through building interactive tools and visualizations tha
 
 ### Phase 1: Exact Replication
 **Status**: Planning/In Progress
+
 Reproduce the original paper's experiments with identical methodology to establish baseline findings.
 
 ### Phase 2: Methodological Critique and Improvements
@@ -24,32 +25,49 @@ Reproduce the original paper's experiments with identical methodology to establi
 
 ### Phase 3: BERT Architectural Variants
 **Status**: Planning
+
 Test whether the illusion persists across BERT-family models: RoBERTa, DeBERTa, ALBERT, DistilBERT, etc.
+
+## Documentation
+
+For comprehensive documentation on replicating and extending this research, see **[doc/README.md](doc/README.md)** which provides:
+
+- **Quick start guides** for different audiences (learners, researchers, developers)
+- **[PAPER_NOTES.md](doc/PAPER_NOTES.md)** - Detailed technical analysis of the paper
+- **[REPLICATION_PLAN.md](doc/REPLICATION_PLAN.md)** - Step-by-step experimental methodology
+- **[DESIGN.md](doc/DESIGN.md)** - Technical architecture and implementation details
+- **[IDEAS.md](doc/IDEAS.md)** - Research extensions and modern model testing
 
 ## Repository Structure
 
 ```
 bert-interpretability-illusion/
 ├── doc/                      # Research documentation
-│   ├── PAPER_NOTES.md       # Detailed technical summary of original paper
+│   ├── README.md            # Documentation guide and navigation
+│   ├── PAPER_NOTES.md       # Detailed technical summary
 │   ├── REPLICATION_PLAN.md  # Step-by-step experimental methodology
 │   ├── IDEAS.md             # Research extensions and hypotheses
-│   └── DESIGN.md            # Technical design notes
+│   ├── DESIGN.md            # Technical design notes
+│   ├── CONSOLIDATION_NOTES.md  # Documentation consolidation record
+│   └── 2104.07143v1.pdf     # Original paper
 ├── streamlit_app.py         # Interactive explainer (current)
 ├── AGENTS.md                # Development environment requirements
 ├── CLAUDE.md                # Quick reference for Claude agents
-└── pyproject.toml           # Project dependencies (managed via uv)
+├── pyproject.toml           # Project dependencies (managed via uv)
+├── .python-version          # Python version specification
+└── uv.lock                  # Locked dependencies
 ```
 
 ## Getting Started
 
 ### For Researchers
-1. Start with `doc/PAPER_NOTES.md` for comprehensive understanding of the original findings
-2. Review `doc/REPLICATION_PLAN.md` for experimental methodology
-3. See `doc/IDEAS.md` for planned extensions and open questions
+1. Start with **[doc/README.md](doc/README.md)** for navigation to all documentation
+2. Read **[doc/PAPER_NOTES.md](doc/PAPER_NOTES.md)** for comprehensive understanding of the original findings
+3. Review **[doc/REPLICATION_PLAN.md](doc/REPLICATION_PLAN.md)** for experimental methodology
+4. See **[doc/IDEAS.md](doc/IDEAS.md)** for planned extensions and open questions
 
 ### For Developers
-1. See `AGENTS.md` for environment setup and development requirements
+1. See **AGENTS.md** for environment setup and development requirements
 2. Use `uv sync` to initialize the Python environment
 3. All Python code must be run via `uv run` (e.g., `uv run streamlit run streamlit_app.py`)
 
