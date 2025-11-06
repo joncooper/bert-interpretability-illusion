@@ -16,12 +16,17 @@ st.title("🔍 An Interpretability Illusion for BERT")
 st.markdown("### Interactive Explainer")
 st.markdown("*Based on the paper by Bolukbasi, Pearce, Yuan, et al. (2021)*")
 
+# Initialize session state for progress tracking
+if 'visited_sections' not in st.session_state:
+    st.session_state.visited_sections = set()
+
 # Sidebar navigation
 st.sidebar.title("Navigation")
 section = st.sidebar.radio(
     "Choose a section:",
     [
         "Introduction",
+        "Understanding BERT",
         "The Illusion Revealed",
         "Experimental Setup",
         "Results & Findings",
@@ -31,9 +36,39 @@ section = st.sidebar.radio(
     ]
 )
 
+# Track visited sections
+st.session_state.visited_sections.add(section)
+
+# Progress indicator
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 Your Progress")
+all_sections = ["Introduction", "Understanding BERT", "The Illusion Revealed",
+                "Experimental Setup", "Results & Findings", "Why Does This Happen?",
+                "Types of Concepts", "Key Takeaways"]
+visited_count = len(st.session_state.visited_sections)
+total_count = len(all_sections)
+st.sidebar.progress(visited_count / total_count)
+st.sidebar.caption(f"{visited_count}/{total_count} sections visited")
+
+# Show checkmarks for visited sections
+for sec in all_sections:
+    if sec in st.session_state.visited_sections:
+        st.sidebar.caption(f"✅ {sec}")
+    else:
+        st.sidebar.caption(f"⬜ {sec}")
+
 # ===== INTRODUCTION =====
 if section == "Introduction":
     st.header("📖 Introduction")
+
+    # TL;DR Box
+    st.info("""
+    **⏱️ TL;DR (30 seconds)**
+
+    This paper shows that neurons in BERT seem to encode clear, interpretable concepts when you look at one dataset — but these "meanings" completely change when you test on different datasets. What looks like meaningful concept encoding is often an illusion caused by dataset-specific patterns, not true understanding. The key lesson: **always validate interpretability claims across multiple diverse datasets**.
+    """)
+
+    st.markdown("---")
 
     st.markdown("""
     ### The Challenge of Neural Network Interpretability
@@ -143,67 +178,322 @@ if section == "Introduction":
         - Understanding requires more sophisticated analysis than neuron-level inspection
         """)
 
+# ===== UNDERSTANDING BERT =====
+elif section == "Understanding BERT":
+    st.header("🤖 Understanding BERT")
+
+    # TL;DR Box
+    st.info("""
+    **⏱️ TL;DR (30 seconds)**
+
+    BERT (Bidirectional Encoder Representations from Transformers) is a language model trained to predict masked words in sentences. It creates 768-dimensional vector representations (embeddings) for text that capture semantic meaning. This paper analyzes BERT's final layer embeddings to understand what "concepts" individual neurons might encode.
+    """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### What is BERT?
+
+    **BERT** stands for **Bidirectional Encoder Representations from Transformers**. It's a neural network architecture designed to understand language by learning from massive amounts of text.
+    """)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("""
+        **Key Characteristics:**
+        - **Bidirectional**: Reads text in both directions (left-to-right and right-to-left)
+        - **Pretrained**: Trained on huge corpora before being fine-tuned for specific tasks
+        - **Transformer-based**: Uses attention mechanisms to process text
+        - **Contextual**: The same word gets different embeddings depending on context
+        """)
+
+    with col2:
+        st.markdown("""
+        **Model Size (BERT-base):**
+        - **12 layers** of transformers
+        - **768-dimensional** hidden size
+        - **12 attention heads** per layer
+        - **110 million** parameters
+        - Trained on **3.3 billion** words
+        """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### How was BERT Trained?
+
+    BERT was trained using two self-supervised tasks on a large corpus combining BookCorpus (800M words) and English Wikipedia (2,500M words):
+    """)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.success("""
+        **Task 1: Masked Language Modeling (MLM)**
+
+        - Randomly mask 15% of words in a sentence
+        - Train the model to predict the masked words
+        - Example: "The cat sat on the [MASK]" → predict "mat"
+        - This teaches BERT to understand context from both directions
+        """)
+
+    with col2:
+        st.info("""
+        **Task 2: Next Sentence Prediction (NSP)**
+
+        - Given two sentences, predict if the second follows the first
+        - Example: "The cat sat on the mat. It was sleeping." → YES
+        - Example: "The cat sat on the mat. Paris is a city." → NO
+        - This teaches BERT to understand relationships between sentences
+        """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### BERT's Architecture
+
+    BERT is built using **transformer** blocks stacked on top of each other:
+    """)
+
+    # Simple architecture diagram
+    st.markdown("""
+    ```
+    Input Text: "The cat sat on the mat"
+           ↓
+    [Tokenization & Embeddings]
+           ↓
+    Layer 1: [Self-Attention] → [Feed-Forward]
+           ↓
+    Layer 2: [Self-Attention] → [Feed-Forward]
+           ↓
+           ...
+           ↓
+    Layer 12: [Self-Attention] → [Feed-Forward]
+           ↓
+    Output: 768-dimensional embeddings for each token
+    ```
+    """)
+
+    with st.expander("🔍 Deep Dive: What are Transformers and Self-Attention?"):
+        st.markdown("""
+        ### Transformers
+
+        Transformers are a type of neural network architecture that process sequences (like sentences) by:
+        1. Looking at all words simultaneously (parallel processing)
+        2. Learning which words are most relevant to each other (attention)
+        3. Building rich representations that capture meaning and context
+
+        Unlike earlier models (RNNs, LSTMs) that process words one-by-one sequentially, transformers can look at the entire sentence at once, making them much more efficient and effective.
+
+        ### Self-Attention Mechanism
+
+        **The Core Idea:** When processing a word, the model should "pay attention" to other relevant words in the sentence.
+
+        **Example:** In the sentence "The animal didn't cross the street because **it** was too tired"
+        - The word "it" could refer to "animal" or "street"
+        - Self-attention helps the model figure out that "it" refers to "animal" (animals get tired, streets don't)
+        - It does this by computing attention scores between "it" and every other word
+
+        **How it Works:**
+        1. For each word, create three vectors: **Query** (what I'm looking for), **Key** (what I have), and **Value** (what I'll contribute)
+        2. Calculate attention scores: how much should this word attend to each other word?
+           - Score = similarity between Query of current word and Key of other words
+        3. Use these scores as weights to combine the Value vectors
+        4. This creates a new representation that incorporates relevant context
+
+        **Multi-Head Attention:**
+        - BERT uses 12 attention heads per layer
+        - Each head can learn different types of relationships
+        - One head might focus on syntax, another on semantics, etc.
+        - The outputs are combined to create rich representations
+
+        ### Why This Matters for This Paper
+
+        The paper analyzes the **final layer embeddings** from BERT:
+        - After 12 layers of self-attention and transformation
+        - Each token has a 768-dimensional vector
+        - These 768 dimensions correspond to the **neurons** being analyzed
+        - The question: do individual dimensions (neurons) encode interpretable concepts?
+        """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### What are Embeddings?
+
+    **Embeddings** are numerical representations of text that capture semantic meaning.
+    """)
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        st.markdown("""
+        **Key Properties:**
+
+        1. **Vector Representation**: Each word/sentence becomes a list of numbers
+           - BERT creates 768-dimensional vectors
+           - Each dimension is a feature/neuron
+
+        2. **Semantic Similarity**: Similar meanings → similar vectors
+           - "cat" and "kitten" have similar embeddings
+           - "cat" and "airplane" have different embeddings
+
+        3. **Contextual**: Same word, different contexts → different embeddings
+           - "bank" (river) vs "bank" (financial)
+           - BERT creates different embeddings based on context
+
+        4. **Geometric Structure**: Relationships are encoded as geometric patterns
+           - Similar concepts cluster together in embedding space
+           - Directions in space can represent transformations
+        """)
+
+    with col2:
+        st.markdown("""
+        **Example:**
+
+        Sentence: "The cat sat"
+
+        BERT Output:
+        - [CLS]: [0.12, -0.34, 0.56, ...]
+        - The: [0.23, -0.12, 0.45, ...]
+        - cat: [0.67, 0.23, -0.12, ...]
+        - sat: [-0.34, 0.56, 0.89, ...]
+
+        Each is a 768-number vector!
+        """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### The [CLS] Token
+
+    BERT adds special tokens to the input:
+    - **[CLS]**: "Classification" token added at the start
+    - **[SEP]**: "Separator" token between sentences
+
+    **This paper focuses on the [CLS] token embedding from the final layer:**
+    - It's designed to represent the entire sentence
+    - It's 768-dimensional (768 neurons)
+    - Question: What do these 768 neurons encode?
+    """)
+
+    st.warning("""
+    **Important for Understanding This Paper:**
+
+    When the researchers talk about "neurons," they mean the **768 dimensions of the [CLS] token embedding**.
+    - Each dimension is a single neuron
+    - A neuron's "activation" is its numerical value for a given sentence
+    - The paper asks: if we look at sentences that give high values for neuron #221, do those sentences share a meaningful pattern?
+    """)
+
+    st.markdown("---")
+
+    st.markdown("""
+    ### Why Study BERT's Neurons?
+
+    **The Hope:** If individual neurons encode interpretable concepts (like "sentiment" or "topic"), we could:
+    - Understand what the model has learned
+    - Diagnose failure cases
+    - Remove biases by modifying specific neurons
+    - Build more trustworthy AI systems
+
+    **The Reality (from this paper):** It's more complicated than that!
+    - Patterns within a single dataset are often misleading
+    - What looks like a "concept neuron" might just be dataset-specific
+    - True interpretability requires multi-dataset validation
+    """)
+
+    st.success("""
+    **Now you're ready!** With this understanding of BERT, you can better appreciate why the paper's findings are so important and surprising.
+    """)
+
 # ===== THE ILLUSION REVEALED =====
 elif section == "The Illusion Revealed":
     st.header("🎭 The Illusion Revealed")
+
+    # TL;DR Box
+    st.info("""
+    **⏱️ TL;DR (30 seconds)**
+
+    Neuron 221 seems to encode "song meanings" in Quora data, "historical dates" in Wikipedia data, and "taking objects from containers" in BookCorpus data. **Same neuron, three completely different interpretations!** This shows the illusion: patterns appear consistent within each dataset but vanish when tested on others.
+    """)
+
+    st.markdown("---")
 
     st.markdown("""
     ### The Classic Example: Neuron 221
 
     Let's examine what happens when we look at the top activating sentences for **Neuron 221 in Layer 12**
     across different datasets. What concept does this neuron encode?
+
+    **💡 Try this:** Look at all three interpretations side-by-side. Notice how they share nothing in common!
     """)
 
-    # Create tabs for each dataset
-    tab1, tab2, tab3 = st.tabs(["🎵 Quora (QQP)", "📅 Wikipedia (QNLI)", "📚 BookCorpus"])
+    st.markdown("")  # Add spacing
 
-    with tab1:
-        st.markdown("### Top Activating Sentences from Quora")
+    # Side-by-side comparison instead of tabs
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("### 🎵 Quora (QQP)")
+        st.markdown("**Top Activating Sentences:**")
         st.markdown("""
         1. *"What is the meaning behind the song ""Angel"" by Eric Clapton?"*
         2. *"What's the meaning of Johnny Cash's song ""King of the Hill""?"*
-        3. *"What is the meaning behind the Tears for Fears song ""Mad World"", such as the lyric, ""All around me are familiar faces""?"*
+        3. *"What is the meaning behind the Tears for Fears song ""Mad World""?"*
         """)
 
         st.success("""
-        **Initial Interpretation:**
+        **Interpretation:**
 
-        Neuron 221 appears to encode questions about **song meanings** or the specific
-        syntactic structure of these types of questions.
-        """)
+        Neuron 221 encodes questions about **song meanings**
+        """, icon="🎵")
 
-    with tab2:
-        st.markdown("### Top Activating Sentences from Wikipedia")
+    with col2:
+        st.markdown("### 📅 Wikipedia (QNLI)")
+        st.markdown("**Top Activating Sentences:**")
         st.markdown("""
-        1. *"On 16 June 2006, it was announced that Everton had entered into talks with Knowsley Council..."*
-        2. *"On 15 September 1940, known as the Battle of Britain Day, an RAF pilot, Ray Holmes of No. 504 Squadron RAF rammed a German bomber..."*
-        3. *"On 20 August 2010, Queen's manager Jim Beach put out a Newsletter stating that the band had signed a new contract with Universal Music."*
+        1. *"On 16 June 2006, it was announced that Everton..."*
+        2. *"On 15 September 1940, known as the Battle of Britain Day..."*
+        3. *"On 20 August 2010, Queen's manager Jim Beach..."*
         """)
 
         st.warning("""
-        **Second Interpretation:**
+        **Interpretation:**
 
-        Wait... now Neuron 221 seems to encode **historical events** or sentences
-        beginning with **dates**. This is completely different from song meanings!
-        """)
+        Neuron 221 encodes **historical events** with dates
+        """, icon="📅")
 
-    with tab3:
-        st.markdown("### Top Activating Sentences from BookCorpus")
+    with col3:
+        st.markdown("### 📚 BookCorpus")
+        st.markdown("**Top Activating Sentences:**")
         st.markdown("""
-        1. *"Lara pulled out the document Reed had supplied from Gresham's briefcase."*
-        2. *"I take Kellan's business card from my pocket and stretch it over to Realm."*
-        3. *"Pilcher took a walkie-talkie out of his coat and spoke into the receiver."*
+        1. *"Lara pulled out the document from Gresham's briefcase."*
+        2. *"I take Kellan's business card from my pocket..."*
+        3. *"Pilcher took a walkie-talkie out of his coat..."*
         """)
 
         st.error("""
-        **Third Interpretation:**
+        **Interpretation:**
 
-        Now Neuron 221 appears to encode something about **physical actions** —
-        specifically taking/pulling objects from containers (pockets, briefcases, coats).
+        Neuron 221 encodes **retrieving objects from containers**
+        """, icon="📚")
 
-        **This is the illusion!** The same neuron shows consistent, interpretable patterns
-        within each dataset, but these patterns are NOT consistent across datasets.
-        """)
+    st.markdown("")  # Add spacing
+    st.markdown("---")
+
+    # Big callout box
+    st.error("""
+    ### ⚠️ **This is the interpretability illusion!**
+
+    The same neuron (Neuron 221) shows **three completely different patterns** across three datasets:
+    - **Song meanings** in Quora
+    - **Historical dates** in Wikipedia
+    - **Physical retrieval actions** in BookCorpus
+
+    These patterns have **nothing in common** with each other. What looked like meaningful concept encoding is actually an artifact of dataset-specific structure!
+    """, icon="🎭")
 
     st.markdown("---")
 
@@ -232,6 +522,15 @@ elif section == "The Illusion Revealed":
 # ===== EXPERIMENTAL SETUP =====
 elif section == "Experimental Setup":
     st.header("🔬 Experimental Setup")
+
+    # TL;DR Box
+    st.info("""
+    **⏱️ TL;DR (30 seconds)**
+
+    Researchers tested 25 BERT neurons and 33 random directions by finding their top-10 activating sentences from each of 4 datasets. Two blind annotators identified patterns in these sentences. **Key finding:** 80% showed patterns within a dataset, but neurons had an average of 2.5 different patterns across the 4 datasets—proving the illusion is systematic, not a fluke.
+    """)
+
+    st.markdown("---")
 
     st.markdown("""
     ### Methodology
@@ -369,9 +668,79 @@ elif section == "Experimental Setup":
     st.markdown("### Visualizing the Embedding Space")
 
     st.markdown("""
-    The researchers used UMAP to visualize how sentences from different datasets
+    The researchers used **UMAP** to visualize how sentences from different datasets
     are distributed in BERT's embedding space:
     """)
+
+    with st.expander("🔍 What is UMAP and Why Do We Need It?"):
+        st.markdown("""
+        ### The Dimensionality Problem
+
+        BERT creates **768-dimensional** embeddings for each sentence. That's 768 numbers per sentence!
+
+        **The Problem:** Humans can't visualize 768 dimensions. We can barely imagine 3 dimensions,
+        let alone 768.
+
+        **The Solution:** Use dimensionality reduction to project the 768-D space down to 2-D
+        so we can see it on a screen.
+
+        ### What is UMAP?
+
+        **UMAP** stands for **Uniform Manifold Approximation and Projection**. It's a technique
+        for reducing high-dimensional data to lower dimensions while preserving important structure.
+
+        **How it Works (Simplified):**
+
+        1. **Preserve Local Structure:**
+           - If two sentences are close together in 768-D space, keep them close in 2-D
+           - If they're far apart in 768-D, keep them far apart in 2-D
+
+        2. **Find the Best 2-D Arrangement:**
+           - UMAP tries to maintain both:
+             - **Local neighborhoods:** nearby points stay nearby
+             - **Global structure:** overall clustering patterns are preserved
+
+        3. **The Result:**
+           - A 2-D scatter plot where each point is a sentence
+           - Distance roughly represents similarity
+           - Clusters show groups of similar sentences
+
+        ### Why UMAP Instead of Other Methods?
+
+        **Alternatives:**
+        - **PCA (Principal Component Analysis):** Linear projection, loses a lot of structure
+        - **t-SNE:** Good for local structure, but slower and distorts global distances
+
+        **UMAP Advantages:**
+        - Preserves both local and global structure better than t-SNE
+        - Faster computation
+        - More mathematically rigorous
+        - Better at showing how different clusters relate to each other
+
+        ### How to Read the UMAP Visualization
+
+        - **Each dot** = one sentence from the dataset
+        - **Colors** = which dataset the sentence came from
+        - **Proximity** = sentences close together are semantically similar
+        - **Clusters** = groups of related sentences
+
+        **Key Observation from the Paper:**
+        Different datasets form **distinct, separated clusters**. This is crucial evidence
+        for the interpretability illusion!
+
+        ### Important Caveat
+
+        **UMAP is an approximation:**
+        - The exact positions are somewhat arbitrary
+        - Distances in 2-D don't perfectly match distances in 768-D
+        - But the overall patterns (clustering, separation) are real
+
+        Think of it like a map projection (like Mercator projection for Earth):
+        - Some distortion is inevitable
+        - But it shows the real structure that exists in the higher dimension
+        """)
+
+    st.markdown("")  # Add spacing
 
     # Simulate UMAP visualization
     np.random.seed(42)
@@ -434,6 +803,15 @@ elif section == "Experimental Setup":
 # ===== RESULTS & FINDINGS =====
 elif section == "Results & Findings":
     st.header("📊 Results & Findings")
+
+    # TL;DR Box
+    st.info("""
+    **⏱️ TL;DR (30 seconds)**
+
+    **Good news:** 80% of neurons show interpretable patterns. **Bad news:** Most neurons show 2-3 different patterns across datasets. Surprisingly, random directions show patterns just as strong as actual neurons! This proves the illusion is real and widespread.
+    """)
+
+    st.markdown("---")
 
     st.markdown("""
     ### How Often Do We Find Patterns?
@@ -619,6 +997,15 @@ elif section == "Results & Findings":
 # ===== WHY DOES THIS HAPPEN =====
 elif section == "Why Does This Happen?":
     st.header("🤔 Why Does This Happen?")
+
+    # TL;DR Box
+    st.info("""
+    **⏱️ TL;DR (30 seconds)**
+
+    Three reasons: **(1) Dataset idiosyncrasy** - different datasets occupy separate regions in embedding space. **(2) Local semantic coherence** - similar sentences cluster together without global patterns. **(3) Annotator error** - humans see patterns even in random data. The main culprit is #1: datasets are more different than we thought!
+    """)
+
+    st.markdown("---")
 
     st.markdown("""
     The researchers identified three main sources of the interpretability illusion:
@@ -823,6 +1210,50 @@ elif section == "Why Does This Happen?":
         global directions).
         """)
 
+        with st.expander("💡 What is a Locality Score? (Simple Explanation)"):
+            st.markdown("""
+            ### The Intuition
+
+            Imagine you're trying to figure out if a neuron encodes "fruit":
+
+            **Scenario A: Global Concept**
+            - Top 10 sentences are spread all over the embedding space
+            - They just happen to all mention fruit
+            - This suggests "fruit" is a true global concept direction
+
+            **Scenario B: Local Clustering**
+            - Top 10 sentences are all neighbors in the embedding space
+            - They're similar sentences that happen to cluster together
+            - One might mention apples, the rest are about similar things
+            - Not a global direction, just found a local cluster!
+
+            ### The Measurement
+
+            **Locality Score = How close are the top-activating sentences to each other?**
+
+            - **Low score (like 0.010)**: Sentences are spread out → could be a global concept
+            - **High score (like 0.026)**: Sentences are clustered together → local coherence
+
+            ### What They Found
+
+            Neurons that show "meaningful" patterns have **significantly higher locality scores**.
+
+            This means when we identify a pattern, it's often because:
+            - The top sentences are neighbors (clustered)
+            - We found a local semantic neighborhood
+            - NOT because there's a global "concept direction"
+
+            ### Why This Matters
+
+            If patterns come from local clustering rather than global directions:
+            - The "interpretation" is an accident of finding a cluster
+            - It won't generalize to other parts of embedding space
+            - It won't generalize to other datasets
+            - It's not really what the neuron "means"
+            """)
+
+        st.markdown("")  # Add spacing
+
         # Locality score comparison
         locality_data = pd.DataFrame({
             'Type': ['Meaningful\nNeurons', 'Meaningless\nNeurons'],
@@ -1024,6 +1455,15 @@ elif section == "Why Does This Happen?":
 # ===== TYPES OF CONCEPTS =====
 elif section == "Types of Concepts":
     st.header("🎯 Types of Concepts in BERT")
+
+    # TL;DR Box
+    st.info("""
+    **⏱️ TL;DR (30 seconds)**
+
+    BERT learns three types of concepts: **(1) Global** - consistent across all datasets (pronouns, common verbs), **(2) Dataset-level** - only meaningful within one dataset's region (main source of illusion), **(3) Local** - semantic clusters without directional patterns. Most neurons encode dataset-level or local concepts, not global ones!
+    """)
+
+    st.markdown("---")
 
     st.markdown("""
     Based on their analysis, the researchers propose a **taxonomy of three types of concepts**
@@ -1389,6 +1829,15 @@ elif section == "Types of Concepts":
 # ===== KEY TAKEAWAYS =====
 elif section == "Key Takeaways":
     st.header("🎯 Key Takeaways")
+
+    # TL;DR Box
+    st.info("""
+    **⏱️ TL;DR (30 seconds)**
+
+    **Main lesson:** Never trust single-dataset interpretability claims! This paper proves that what looks like meaningful neuron interpretations are often dataset-specific artifacts. The new gold standard: **validate across multiple diverse datasets**. For AI safety and bias mitigation, this means many published interpretability findings may be unreliable.
+    """)
+
+    st.markdown("---")
 
     st.markdown("""
     ### Main Contributions of the Paper
