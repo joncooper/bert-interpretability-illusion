@@ -45,8 +45,35 @@ The interactive explainer includes:
 }
 ```
 
-## Files
+## Documentation
 
-- `streamlit_app.py`: Main interactive explainer application
-- `2104.07143v1.pdf`: Original research paper
-- `requirements.txt`: Python dependencies
+For comprehensive documentation on replicating and extending this research:
+
+📚 **[doc/](doc/)** - Complete documentation suite:
+- **[README.md](doc/README.md)** - Documentation guide and overview
+- **[PAPER_NOTES.md](doc/PAPER_NOTES.md)** - Detailed analysis of the paper
+- **[REPLICATION_PLAN.md](doc/REPLICATION_PLAN.md)** - Step-by-step replication guide
+- **[DESIGN.md](doc/DESIGN.md)** - Technical architecture and implementation
+- **[IDEAS.md](doc/IDEAS.md)** - Extension ideas and future research directions
+
+**New to the project?** Start with [doc/PAPER_NOTES.md](doc/PAPER_NOTES.md)
+
+**Want to replicate the experiments?** Follow [doc/REPLICATION_PLAN.md](doc/REPLICATION_PLAN.md)
+
+**Looking to extend the research?** Explore [doc/IDEAS.md](doc/IDEAS.md) for modern LLM extensions
+
+## Repository Structure
+
+```
+bert-interpretability-illusion/
+├── streamlit_app.py          # Interactive web application
+├── requirements.txt           # Python dependencies
+├── README.md                  # This file
+└── doc/                       # Comprehensive documentation
+    ├── README.md              # Documentation guide
+    ├── PAPER_NOTES.md         # Paper analysis
+    ├── REPLICATION_PLAN.md    # Replication guide
+    ├── DESIGN.md              # Technical design
+    ├── IDEAS.md               # Extension ideas
+    └── 2104.07143v1.pdf       # Original paper
+```
