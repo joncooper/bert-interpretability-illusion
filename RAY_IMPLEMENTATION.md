@@ -331,6 +331,541 @@ ssh -L 8888:localhost:8888 home-pc
 
 ---
 
+## Practical Getting Started: Batch Job Pattern
+
+Okay, let's assume you want to actually use Ray as a learning exercise and to build good patterns for future scaling. Here's a practical, minimal setup for your Mac → home PC workflow.
+
+### The Goal
+
+Submit embedding extraction jobs from your Mac that:
+- Run on your home PC's 4070 Ti Super
+- Handle datasets properly
+- Cache/store results
+- Let you disconnect after submission
+
+### Step-by-Step Setup
+
+#### 1. Install Ray on Both Machines
+
+```bash
+# On home PC
+pip install "ray[default]"
+
+# On Mac
+pip install "ray[default]"
+
+# Or with uv (recommended)
+uv add "ray[default]"
+```
+
+#### 2. Start Ray Cluster on Home PC
+
+```bash
+# On home PC
+ray start --head --dashboard-port=8265
+
+# You'll see output like:
+# Ray runtime started.
+# Dashboard URL: http://127.0.0.1:8265
+```
+
+**Note the dashboard URL** - you can use SSH tunnel to view it from Mac:
+```bash
+# On Mac
+ssh -L 8265:localhost:8265 user@home-pc
+# Then open http://localhost:8265 in browser
+```
+
+#### 3. Create Your First Ray Job Script
+
+Create `jobs/extract_embeddings.py`:
+
+```python
+"""
+Ray job for extracting BERT embeddings.
+This script runs on the home PC.
+"""
+import ray
+import numpy as np
+import torch
+from transformers import AutoModel, AutoTokenizer
+from pathlib import Path
+import json
+from datetime import datetime
+
+# Connect to the local Ray cluster (auto-detect when running as job)
+ray.init(address="auto")
+
+@ray.remote(num_gpus=1)
+class BERTEmbedder:
+    """GPU actor for BERT embedding extraction."""
+
+    def __init__(self):
+        print("Loading BERT model on GPU...")
+        self.device = torch.device("cuda")
+        self.model = AutoModel.from_pretrained("bert-base-uncased").to(self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        self.model.eval()
+        print(f"Model loaded on {torch.cuda.get_device_name(0)}")
+
+    def embed_batch(self, sentences):
+        """Extract embeddings for a batch of sentences."""
+        inputs = self.tokenizer(
+            sentences,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512
+        )
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        # Return [CLS] token embeddings
+        return outputs.last_hidden_state[:, 0, :].cpu().numpy()
+
+
+def main():
+    # Configuration
+    output_dir = Path("/path/to/results")  # Adjust for your home PC
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    batch_size = 32
+
+    # Example: Load your sentences
+    # In real code, use Ray Data (see below)
+    sentences = [
+        "This is a test sentence.",
+        "Another example here.",
+        # ... your actual data
+    ]
+
+    print(f"Processing {len(sentences)} sentences...")
+
+    # Create embedder actor
+    embedder = BERTEmbedder.remote()
+
+    # Process in batches
+    all_embeddings = []
+    futures = []
+
+    for i in range(0, len(sentences), batch_size):
+        batch = sentences[i:i+batch_size]
+        future = embedder.embed_batch.remote(batch)
+        futures.append(future)
+
+    # Collect results
+    print(f"Submitted {len(futures)} batches. Waiting for results...")
+    batch_results = ray.get(futures)
+    all_embeddings = np.vstack(batch_results)
+
+    # Save results
+    output_file = output_dir / f"embeddings_{datetime.now().strftime('%Y%m%d_%H%M%S')}.npy"
+    np.save(output_file, all_embeddings)
+
+    # Save metadata
+    metadata = {
+        "num_sentences": len(sentences),
+        "embedding_dim": all_embeddings.shape[1],
+        "timestamp": datetime.now().isoformat(),
+        "model": "bert-base-uncased",
+        "batch_size": batch_size
+    }
+
+    metadata_file = output_file.with_suffix('.json')
+    with open(metadata_file, 'w') as f:
+        json.dump(metadata, f, indent=2)
+
+    print(f"✓ Saved embeddings to {output_file}")
+    print(f"✓ Shape: {all_embeddings.shape}")
+
+    ray.shutdown()
+
+if __name__ == "__main__":
+    main()
+```
+
+#### 4. Submit Job from Mac
+
+```bash
+# From Mac - submit to home PC
+# Assumes you have SSH tunnel or network access
+
+ray job submit \
+  --address http://home-pc:8265 \
+  --working-dir . \
+  -- python jobs/extract_embeddings.py
+
+# You'll get a job ID like: raysubmit_xxxxx
+# Job runs on home PC - you can disconnect!
+```
+
+#### 5. Check Job Status
+
+```bash
+# Check status
+ray job status raysubmit_xxxxx --address http://home-pc:8265
+
+# View logs
+ray job logs raysubmit_xxxxx --address http://home-pc:8265
+
+# List all jobs
+ray job list --address http://home-pc:8265
+```
+
+### Using Ray Data for Dataset Handling
+
+Ray Data is better for large datasets. Here's how to integrate it:
+
+```python
+"""
+Using Ray Data for scalable dataset loading and processing.
+"""
+import ray
+from ray.data import read_json, read_parquet, from_items
+import numpy as np
+
+ray.init(address="auto")
+
+# Option 1: Load from files (JSON, Parquet, CSV, etc.)
+ds = ray.data.read_json("s3://bucket/sentences.json")
+# Or local files:
+# ds = ray.data.read_json("/path/to/sentences.json")
+
+# Option 2: Create from Python objects
+sentences_data = [
+    {"text": "First sentence", "dataset": "QQP", "idx": 0},
+    {"text": "Second sentence", "dataset": "QQP", "idx": 1},
+    # ...
+]
+ds = ray.data.from_items(sentences_data)
+
+# Option 3: Load HuggingFace datasets
+from datasets import load_dataset as hf_load_dataset
+
+def load_qqp_dataset():
+    """Load QQP dataset from HuggingFace."""
+    dataset = hf_load_dataset("glue", "qqp", split="train")
+    # Convert to Ray Data format
+    items = [
+        {"text": item["question1"], "dataset": "QQP", "idx": i}
+        for i, item in enumerate(dataset)
+    ]
+    return ray.data.from_items(items)
+
+ds = load_qqp_dataset()
+
+# Define embedding function for Ray Data
+class BERTEmbedding:
+    def __init__(self):
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = AutoModel.from_pretrained("bert-base-uncased").to(self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        self.model.eval()
+
+    def __call__(self, batch):
+        """Process a batch of rows."""
+        texts = batch["text"]
+
+        inputs = self.tokenizer(
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=512
+        )
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        # Add embeddings to batch
+        batch["embedding"] = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+        return batch
+
+# Apply embedding transformation
+# This automatically parallelizes across available GPUs
+ds_with_embeddings = ds.map_batches(
+    BERTEmbedding,
+    batch_size=32,
+    num_gpus=1,  # Use 1 GPU per worker
+    concurrency=1  # Number of parallel workers (1 GPU = 1 worker for you)
+)
+
+# Save results
+ds_with_embeddings.write_parquet("/path/to/output/embeddings/")
+
+print("✓ Embeddings saved!")
+```
+
+**Benefits of Ray Data:**
+- Automatically handles batching
+- Streaming processing (doesn't load all data into memory)
+- Built-in progress tracking
+- Easy to switch between local files, S3, etc.
+- Fault tolerance built-in
+
+### Result Storage and Caching Patterns
+
+#### Pattern 1: Local Filesystem (Simplest)
+
+```python
+# In your job script
+from pathlib import Path
+import numpy as np
+
+# Define output structure
+output_dir = Path("/path/to/results")
+output_dir.mkdir(parents=True, exist_ok=True)
+
+# Save embeddings by dataset
+for dataset_name, embeddings in results.items():
+    output_file = output_dir / f"{dataset_name}_embeddings.npy"
+    np.save(output_file, embeddings)
+    print(f"Saved {dataset_name}: {embeddings.shape}")
+```
+
+**Access from Mac:**
+```bash
+# Use scp to fetch results
+scp home-pc:/path/to/results/*.npy ./local_results/
+
+# Or mount home PC filesystem
+# (on Mac with SSHFS or SMB share)
+```
+
+#### Pattern 2: Ray Object Store (For Inter-Job Sharing)
+
+```python
+import ray
+
+# Store large objects in Ray's shared memory
+embeddings_ref = ray.put(large_embeddings_array)
+
+# Multiple tasks can access without copying
+@ray.remote
+def analyze_embeddings(embeddings_ref):
+    embeddings = ray.get(embeddings_ref)  # Zero-copy on same node
+    return compute_stats(embeddings)
+
+futures = [analyze_embeddings.remote(embeddings_ref) for _ in range(10)]
+results = ray.get(futures)
+```
+
+**Note:** Object store is in-memory and cleared when cluster stops. Use for intermediate results, not final storage.
+
+#### Pattern 3: Persistent Caching with Checkpoints
+
+```python
+"""
+Checkpoint pattern for long-running jobs.
+Allows resuming if job fails.
+"""
+import pickle
+from pathlib import Path
+
+class CheckpointManager:
+    def __init__(self, checkpoint_dir):
+        self.checkpoint_dir = Path(checkpoint_dir)
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    def save(self, data, name):
+        """Save checkpoint."""
+        checkpoint_file = self.checkpoint_dir / f"{name}.pkl"
+        with open(checkpoint_file, 'wb') as f:
+            pickle.dump(data, f)
+        print(f"✓ Checkpoint saved: {checkpoint_file}")
+
+    def load(self, name):
+        """Load checkpoint if exists."""
+        checkpoint_file = self.checkpoint_dir / f"{name}.pkl"
+        if checkpoint_file.exists():
+            with open(checkpoint_file, 'rb') as f:
+                return pickle.load(f)
+        return None
+
+    def exists(self, name):
+        """Check if checkpoint exists."""
+        checkpoint_file = self.checkpoint_dir / f"{name}.pkl"
+        return checkpoint_file.exists()
+
+# Usage in job
+checkpoint_mgr = CheckpointManager("/path/to/checkpoints")
+
+# Check if we can resume
+if checkpoint_mgr.exists("embeddings_progress"):
+    progress = checkpoint_mgr.load("embeddings_progress")
+    print(f"Resuming from batch {progress['last_batch']}")
+    start_batch = progress['last_batch']
+else:
+    start_batch = 0
+
+# Process batches
+for batch_idx in range(start_batch, total_batches):
+    # Process batch
+    result = process_batch(batch_idx)
+
+    # Checkpoint every 100 batches
+    if (batch_idx + 1) % 100 == 0:
+        checkpoint_mgr.save({
+            'last_batch': batch_idx + 1,
+            'results_so_far': accumulated_results
+        }, "embeddings_progress")
+```
+
+#### Pattern 4: Ray Data with Caching
+
+```python
+# Ray Data automatically handles caching
+import ray
+
+ds = ray.data.read_json("/path/to/data.json")
+
+# Compute embeddings (expensive)
+ds_with_embeddings = ds.map_batches(BERTEmbedding, batch_size=32, num_gpus=1)
+
+# Write to disk for future use
+ds_with_embeddings.write_parquet("/path/to/cached_embeddings/")
+
+# Later, in another job/session:
+# Load from cache instead of recomputing
+cached_ds = ray.data.read_parquet("/path/to/cached_embeddings/")
+
+# Continue with analysis
+results = cached_ds.map_batches(AnalyzeEmbeddings, batch_size=100)
+```
+
+### Recommended Workflow for Your Use Case
+
+Here's what I'd suggest for your Mac → home PC setup:
+
+```python
+"""
+Complete workflow: Mac submits job to home PC.
+"""
+
+# 1. PREPARE DATA (on Mac or home PC)
+# Create a simple JSON file with your sentences
+import json
+from pathlib import Path
+
+sentences_file = Path("data/sentences.json")
+sentences_file.parent.mkdir(exist_ok=True)
+
+data = [
+    {"text": sentence, "dataset": dataset_name, "idx": idx}
+    for dataset_name, sentences in your_datasets.items()
+    for idx, sentence in enumerate(sentences)
+]
+
+with open(sentences_file, 'w') as f:
+    json.dump(data, f)
+
+# 2. UPLOAD DATA TO HOME PC (if prepared on Mac)
+# scp data/sentences.json home-pc:/path/to/bert-project/data/
+
+# 3. CREATE JOB SCRIPT (save as jobs/run_embeddings.py on home PC)
+"""
+(see complete script below)
+"""
+
+# 4. SUBMIT FROM MAC
+# ray job submit --address http://home-pc:8265 \
+#   --working-dir /path/to/bert-project \
+#   -- uv run python jobs/run_embeddings.py
+
+# 5. MONITOR
+# ray job logs <job-id> --address http://home-pc:8265 --follow
+
+# 6. RETRIEVE RESULTS
+# scp home-pc:/path/to/results/*.npy ./results/
+```
+
+**Complete Job Script:**
+
+```python
+# jobs/run_embeddings.py
+import ray
+from ray.data import read_json
+import numpy as np
+from pathlib import Path
+import json
+from datetime import datetime
+
+@ray.remote(num_gpus=1)
+class BERTEmbedder:
+    def __init__(self):
+        import torch
+        from transformers import AutoModel, AutoTokenizer
+
+        self.device = torch.device("cuda")
+        self.model = AutoModel.from_pretrained("bert-base-uncased").to(self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        self.model.eval()
+
+    def __call__(self, batch):
+        texts = batch["text"]
+        inputs = self.tokenizer(texts, return_tensors="pt", padding=True,
+                               truncation=True, max_length=512)
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+
+        batch["embedding"] = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+        return batch
+
+def main():
+    ray.init(address="auto")
+
+    # Load data
+    ds = read_json("data/sentences.json")
+
+    # Apply embeddings
+    ds_embedded = ds.map_batches(
+        BERTEmbedder,
+        batch_size=32,
+        num_gpus=1,
+        concurrency=1
+    )
+
+    # Save by dataset
+    output_dir = Path("results/embeddings")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Group by dataset and save separately
+    for dataset_name in ["QQP", "QNLI", "Wiki", "BookCorpus"]:
+        dataset_rows = ds_embedded.filter(lambda row: row["dataset"] == dataset_name)
+
+        # Collect embeddings
+        rows = dataset_rows.take_all()
+        embeddings = np.array([row["embedding"] for row in rows])
+
+        # Save
+        output_file = output_dir / f"{dataset_name}_embeddings.npy"
+        np.save(output_file, embeddings)
+        print(f"✓ {dataset_name}: {embeddings.shape}")
+
+    print("✓ All embeddings saved!")
+    ray.shutdown()
+
+if __name__ == "__main__":
+    main()
+```
+
+This gives you:
+- ✅ Submit from Mac, run on home PC
+- ✅ Proper dataset handling
+- ✅ GPU utilization
+- ✅ Structured result storage
+- ✅ Easy to scale later (just change `concurrency` when you add more GPUs)
+
+---
+
 ## If You Really Do Need Scale...
 
 If you later find yourself needing true distributed computing (multiple GPUs, multiple machines, hundreds of experiments), the original massive Ray implementation is below for reference.
