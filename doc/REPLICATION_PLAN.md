@@ -24,40 +24,50 @@ This document provides a detailed, step-by-step plan to replicate all experiment
 
 ### 1.1 Python Environment
 
-```bash
-# Create virtual environment
-python3 -m venv bert-illusion-env
-source bert-illusion-env/bin/activate  # On Windows: bert-illusion-env\Scripts\activate
+This project uses [uv](https://docs.astral.sh/uv/) for Python dependency management. See the root AGENTS.md for complete setup requirements.
 
-# Upgrade pip
-pip install --upgrade pip
+```bash
+# Clone and navigate to repository
+cd bert-interpretability-illusion
+
+# Initialize uv environment (creates .venv automatically)
+uv sync
 ```
+
+The `uv sync` command will:
+- Create a virtual environment in `.venv/`
+- Install Python 3.12 (specified in `.python-version`)
+- Install all dependencies from `pyproject.toml`
 
 ### 1.2 Required Libraries
 
+To add additional packages needed for replication:
+
 ```bash
 # Core ML libraries
-pip install torch==1.9.0  # or compatible version
-pip install transformers==4.11.3  # HuggingFace Transformers
-pip install numpy==1.21.2
-pip install scipy==1.7.1
+uv add torch  # Latest compatible version
+uv add transformers  # HuggingFace Transformers
+uv add numpy
+uv add scipy
 
 # Data processing
-pip install pandas==1.3.3
-pip install datasets==1.12.1  # HuggingFace datasets library
+uv add pandas
+uv add datasets  # HuggingFace datasets library
 
 # Visualization
-pip install matplotlib==3.4.3
-pip install seaborn==0.11.2
-pip install umap-learn==0.5.1  # For UMAP dimensionality reduction
+uv add matplotlib
+uv add seaborn
+uv add umap-learn  # For UMAP dimensionality reduction
 
 # Machine learning
-pip install scikit-learn==0.24.2  # For SVM classifier
+uv add scikit-learn  # For SVM classifier
 
 # Optional: Progress bars and utilities
-pip install tqdm==4.62.3
-pip install jupyter==1.0.0  # For interactive analysis
+uv add tqdm
+uv add jupyter  # For interactive analysis
 ```
+
+**Note:** The base project already includes some of these dependencies. Check `pyproject.toml` before adding.
 
 ### 1.3 Hardware Requirements
 
@@ -73,7 +83,9 @@ pip install jupyter==1.0.0  # For interactive analysis
 
 ### 1.4 Verify Installation
 
-```python
+```bash
+# Run verification script using uv
+uv run python -c "
 import torch
 import transformers
 import numpy as np
@@ -82,10 +94,15 @@ from datasets import load_dataset
 import umap
 import sklearn
 
-print(f"PyTorch version: {torch.__version__}")
-print(f"Transformers version: {transformers.__version__}")
-print(f"CUDA available: {torch.cuda.is_available()}")
+print(f'PyTorch version: {torch.__version__}')
+print(f'Transformers version: {transformers.__version__}')
+print(f'CUDA available: {torch.cuda.is_available()}')
+"
 ```
+
+**Important:** All Python commands in this replication guide must be run using `uv run`. For example:
+- `uv run python script.py`
+- `uv run jupyter notebook`
 
 ---
 
