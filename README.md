@@ -1,10 +1,6 @@
 # bert-interpretability-illusion
 
-Active research project investigating the "interpretability illusion" phenomenon in BERT and its architectural variants.
-
-## Research Mission
-
-This repository contains an ongoing investigation into whether the interpretability illusion discovered in BERT—where individual neurons appear to encode meaningful concepts within one dataset but show completely different patterns in another—is fundamental to how these models learn or an artifact of specific design choices.
+Replicate, interpret, and extend the paper "An interpretability illusion for BERT".
 
 ## The Core Finding
 
